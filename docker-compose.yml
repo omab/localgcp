@@ -1,0 +1,24 @@
+services:
+  localgcp:
+    build: .
+    image: localgcp:latest
+    container_name: localgcp
+    ports:
+      - "4443:4443"   # Cloud Storage
+      - "8080:8080"   # Firestore
+      - "8085:8085"   # Pub/Sub (gRPC / PUBSUB_EMULATOR_HOST)
+      - "8086:8086"   # Pub/Sub REST
+      - "8090:8090"   # Secret Manager
+      - "8123:8123"   # Cloud Tasks
+      - "8888:8888"   # Admin UI
+    environment:
+      - LOCALGCP_PROJECT=local-project
+      - LOCALGCP_LOCATION=us-central1
+      # Uncomment to persist data to a volume:
+      # - LOCALGCP_DATA_DIR=/data
+    # volumes:
+    #   - localgcp-data:/data
+    restart: unless-stopped
+
+# volumes:
+#   localgcp-data:
