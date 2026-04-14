@@ -35,6 +35,14 @@ def _get_services() -> dict:
     from localgcp.services.secretmanager.store import get_store as sm_store
     from localgcp.services.tasks.store import get_store as tasks_store
 
+    from localgcp.services.bigquery.engine import get_engine as bq_get_engine
+    bq = bq_get_engine()
+    bq_datasets = bq.list_datasets(settings.default_project)
+    bq_table_count = sum(
+        len(bq.list_tables(settings.default_project, d["datasetReference"]["datasetId"]))
+        for d in bq_datasets
+    )
+
     return {
         "gcs": {
             "port": settings.gcs_port,
@@ -61,6 +69,11 @@ def _get_services() -> dict:
             "port": settings.tasks_port,
             "stats": tasks_store().stats(),
             "docs_url": f"http://localhost:{settings.tasks_port}/docs",
+        },
+        "bigquery": {
+            "port": settings.bigquery_port,
+            "stats": {"datasets": len(bq_datasets), "tables": bq_table_count},
+            "docs_url": f"http://localhost:{settings.bigquery_port}/docs",
         },
     }
 
@@ -199,6 +212,7 @@ _HTML = """<!DOCTYPE html>
   <button class="tab-btn" data-tab="firestore">Firestore</button>
   <button class="tab-btn" data-tab="secrets">Secret Manager</button>
   <button class="tab-btn" data-tab="tasks">Cloud Tasks</button>
+  <button class="tab-btn" data-tab="bigquery">BigQuery</button>
 </nav>
 
 <main>
@@ -232,6 +246,11 @@ _HTML = """<!DOCTYPE html>
 <div id="panel-tasks" class="panel">
   <div id="tasks-nav" class="breadcrumb" style="display:none"></div>
   <div id="tasks-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-bigquery" class="panel">
+  <div id="bq-nav" class="breadcrumb" style="display:none"></div>
+  <div id="bq-content"><div class="loading">Loading&hellip;</div></div>
 </div>
 
 </main>
@@ -300,6 +319,7 @@ const loaders = {
   firestore: loadFirestore,
   secrets:  loadSecrets,
   tasks:    loadTasks,
+  bigquery: loadBigQuery,
 };
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -324,6 +344,7 @@ async function loadOverview() {
     const labels = {
       gcs: 'Cloud Storage', pubsub: 'Cloud Pub/Sub',
       firestore: 'Cloud Firestore', secretmanager: 'Secret Manager', tasks: 'Cloud Tasks',
+      bigquery: 'BigQuery',
     };
     let rows = '';
     for (const [svc, info] of Object.entries(d.services || {})) {
@@ -869,6 +890,143 @@ async function deleteTask(taskName, queueName) {
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
+// ── BigQuery ──────────────────────────────────────────────────────────────────
+async function loadBigQuery() {
+  $('bq-nav').style.display = 'none';
+  $('bq-content').innerHTML = '<div class="loading">Loading datasets&hellip;</div>';
+  try {
+    const datasets = await api('/api/bigquery/datasets');
+    renderBQDatasets(datasets);
+  } catch (e) {
+    $('bq-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderBQDatasets(datasets) {
+  $('bq-nav').style.display = 'none';
+  let rows = '';
+  for (const d of datasets) {
+    const id = d.datasetId;
+    const n = JSON.stringify(id);
+    rows += `<tr>
+      <td><button class="btn-link" onclick="loadBQTables(${n})">${esc(id)}</button></td>
+      <td><span class="cnt">${d.tableCount}</span></td>
+      <td class="dim">${d.location || 'US'}</td>
+      <td class="actions">
+        <button class="btn btn-danger" onclick="deleteBQDataset(${n})">Delete</button>
+      </td>
+    </tr>`;
+  }
+  $('bq-content').innerHTML = `
+    <div class="card">
+      <div class="card-header"><h2>Datasets</h2><span class="cnt">${datasets.length}</span></div>
+      <table>
+        <thead><tr><th>Dataset</th><th>Tables</th><th>Location</th><th>Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="empty">No datasets</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+async function loadBQTables(dataset) {
+  $('bq-nav').style.display = 'flex';
+  $('bq-nav').innerHTML = `<a onclick="loadBigQuery()">Datasets</a> <span>&#8250;</span> ${esc(dataset)}`;
+  $('bq-content').innerHTML = '<div class="loading">Loading tables&hellip;</div>';
+  try {
+    const tables = await api('/api/bigquery/tables?' + new URLSearchParams({ dataset }));
+    renderBQTables(dataset, tables);
+  } catch (e) {
+    $('bq-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderBQTables(dataset, tables) {
+  const ds = JSON.stringify(dataset);
+  let rows = '';
+  for (const t of tables) {
+    const id = t.tableId;
+    const tn = JSON.stringify(id);
+    const fieldCount = (t.schema && t.schema.fields) ? t.schema.fields.length : 0;
+    rows += `<tr>
+      <td><button class="btn-link" onclick="loadBQPreview(${ds}, ${tn})">${esc(id)}</button></td>
+      <td class="dim">${fieldCount} field${fieldCount !== 1 ? 's' : ''}</td>
+      <td><span class="cnt">${t.numRows || 0}</span></td>
+      <td class="actions">
+        <button class="btn btn-ghost" onclick="loadBQPreview(${ds}, ${tn})">Preview</button>
+        <button class="btn btn-danger" onclick="deleteBQTable(${ds}, ${tn})">Delete</button>
+      </td>
+    </tr>`;
+  }
+  $('bq-content').innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h2>${esc(dataset)}</h2><span class="cnt">${tables.length} table${tables.length !== 1 ? 's' : ''}</span>
+      </div>
+      <table>
+        <thead><tr><th>Table</th><th>Schema</th><th>Rows</th><th>Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="empty">No tables</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+async function loadBQPreview(dataset, table) {
+  const ds = JSON.stringify(dataset);
+  $('bq-nav').style.display = 'flex';
+  $('bq-nav').innerHTML = `<a onclick="loadBigQuery()">Datasets</a> <span>&#8250;</span> <a onclick="loadBQTables(${ds})">${esc(dataset)}</a> <span>&#8250;</span> ${esc(table)}`;
+  $('bq-content').innerHTML = '<div class="loading">Loading preview&hellip;</div>';
+  try {
+    const data = await api('/api/bigquery/preview?' + new URLSearchParams({ dataset, table }));
+    renderBQPreview(dataset, table, data);
+  } catch (e) {
+    $('bq-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderBQPreview(dataset, table, data) {
+  const fields = (data.schema && data.schema.fields) || [];
+  const rows = data.rows || [];
+  const headCols = fields.map(f =>
+    `<th>${esc(f.name)}<br><span class="dim" style="font-weight:400;text-transform:none">${esc(f.type)}</span></th>`
+  ).join('');
+  let bodyRows = '';
+  for (const row of rows) {
+    const cells = (row.f || []).map(cell =>
+      `<td class="mono">${cell.v === null ? '<em style="color:#9aa0a6">null</em>' : esc(String(cell.v))}</td>`
+    ).join('');
+    bodyRows += `<tr>${cells}</tr>`;
+  }
+  $('bq-content').innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h2>${esc(table)}</h2>
+        <span class="cnt">${data.totalRows || 0} rows total</span>
+        <span class="dim" style="margin-left:.5rem">showing first ${rows.length}</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>${headCols || '<th>(no schema)</th>'}</tr></thead>
+          <tbody>${bodyRows || `<tr><td colspan="${fields.length || 1}" class="empty">No rows</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function deleteBQDataset(dataset) {
+  if (!confirm(`Delete dataset "${dataset}" and all its tables?`)) return;
+  try {
+    await api('/api/bigquery/dataset?' + new URLSearchParams({ dataset }), { method: 'DELETE' });
+    loaded.bigquery = false;
+    loadBigQuery();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+async function deleteBQTable(dataset, table) {
+  if (!confirm(`Delete table "${dataset}.${table}"?`)) return;
+  try {
+    await api('/api/bigquery/table?' + new URLSearchParams({ dataset, table }), { method: 'DELETE' });
+    loadBQTables(dataset);
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadOverview();
 </script>
@@ -1168,6 +1326,76 @@ async def api_tasks_delete_task(task: str = Query(...)):
     return {"deleted": task}
 
 
+# ── BigQuery ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/bigquery/datasets")
+async def api_bq_datasets():
+    from localgcp.services.bigquery.engine import get_engine
+    engine = get_engine()
+    project = settings.default_project
+    datasets = engine.list_datasets(project)
+    result = []
+    for d in sorted(datasets, key=lambda x: x["datasetReference"]["datasetId"]):
+        ds_id = d["datasetReference"]["datasetId"]
+        tables = engine.list_tables(project, ds_id)
+        result.append({
+            "datasetId": ds_id,
+            "location": d.get("location", "US"),
+            "tableCount": len(tables),
+        })
+    return result
+
+
+@app.get("/api/bigquery/tables")
+async def api_bq_tables(dataset: str = Query(...)):
+    from localgcp.services.bigquery.engine import get_engine
+    engine = get_engine()
+    tables = engine.list_tables(settings.default_project, dataset)
+    return [
+        {
+            "tableId": t["tableReference"]["tableId"],
+            "schema": t.get("schema"),
+            "numRows": t.get("numRows", "0"),
+        }
+        for t in sorted(tables, key=lambda x: x["tableReference"]["tableId"])
+    ]
+
+
+@app.get("/api/bigquery/preview")
+async def api_bq_preview(
+    dataset: str = Query(...),
+    table: str = Query(...),
+    maxResults: int = Query(default=50),
+):
+    from localgcp.services.bigquery.engine import get_engine
+    engine = get_engine()
+    try:
+        return engine.list_rows(settings.default_project, dataset, table, max_results=maxResults)
+    except ValueError as e:
+        return JSONResponse(status_code=404, content={"error": str(e)})
+
+
+@app.delete("/api/bigquery/dataset")
+async def api_bq_delete_dataset(dataset: str = Query(...)):
+    from localgcp.services.bigquery.engine import get_engine
+    engine = get_engine()
+    try:
+        engine.delete_dataset(settings.default_project, dataset, delete_contents=True)
+    except ValueError as e:
+        return JSONResponse(status_code=404, content={"error": str(e)})
+    return {"deleted": dataset}
+
+
+@app.delete("/api/bigquery/table")
+async def api_bq_delete_table(dataset: str = Query(...), table: str = Query(...)):
+    from localgcp.services.bigquery.engine import get_engine
+    engine = get_engine()
+    found = engine.delete_table(settings.default_project, dataset, table)
+    if not found:
+        return JSONResponse(status_code=404, content={"error": "Table not found"})
+    return {"deleted": f"{dataset}.{table}"}
+
+
 # ---------------------------------------------------------------------------
 # Reset endpoints
 # ---------------------------------------------------------------------------
@@ -1181,7 +1409,7 @@ async def reset_service(service: str):
 
 @app.post("/reset")
 async def reset_all():
-    for svc in ("gcs", "pubsub", "firestore", "secretmanager", "tasks"):
+    for svc in ("gcs", "pubsub", "firestore", "secretmanager", "tasks", "bigquery"):
         _reset_one(svc)
     return {"reset": "all"}
 
@@ -1204,6 +1432,9 @@ def _reset_one(service: str) -> None:
     elif service == "tasks":
         from localgcp.services.tasks.store import get_store
         get_store().reset()
+    elif service == "bigquery":
+        from localgcp.services.bigquery.engine import get_engine
+        get_engine().reset()
 
 
 @app.get("/health")
