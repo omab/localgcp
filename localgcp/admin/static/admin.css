@@ -21,7 +21,7 @@ nav button {
 nav button:hover { color: #1a73e8; background: #f8f9fa; }
 nav button.active { color: #1a73e8; border-bottom-color: #1a73e8; font-weight: 500; }
 
-main { padding: 1.5rem 2rem; max-width: 1200px; }
+main { padding: 1.5rem 2rem; }
 
 .panel { display: none; }
 .panel.active { display: block; }
