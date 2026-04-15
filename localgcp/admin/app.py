@@ -190,6 +190,22 @@ _HTML = """<!DOCTYPE html>
     .pre { background: #f8f9fa; border: 1px solid #dadce0; border-radius: 4px; padding: .6rem .8rem; font-family: monospace; font-size: .8rem; white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow-y: auto; }
     .secret-val { margin: .5rem 1rem .75rem; }
 
+    th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable:hover { background: #eee; }
+    .sort-icon { margin-left: .25rem; font-size: .65rem; color: #9aa0a6; }
+    th.sort-asc .sort-icon, th.sort-desc .sort-icon { color: #1a73e8; }
+
+    .pagination {
+      display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+      padding: .55rem 1rem; border-top: 1px solid #f1f3f4; font-size: .82rem; color: #5f6368;
+    }
+    .pagination .page-info { flex: 1; min-width: 8rem; }
+    .pagination select {
+      padding: .18rem .4rem; border: 1px solid #dadce0; border-radius: 4px;
+      font-size: .82rem; font-family: inherit; background: white;
+    }
+    .pagination .btn { padding: .22rem .6rem; font-size: .8rem; }
+
     /* Modal */
     .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 200; align-items: center; justify-content: center; }
     .overlay.open { display: flex; }
@@ -411,75 +427,196 @@ async function resetAll() {
 }
 
 // ── GCS ──────────────────────────────────────────────────────────────────────
+
+const _gcs = {
+  buckets: [],
+  bSort: { f: 'name', d: 1 },
+  bucket: null,
+  objects: [],
+  oSort: { f: 'name', d: 1 },
+  page: 0,
+  pageSize: 50,
+};
+
+function _gcsCmp(a, b, field, dir) {
+  let av = a[field], bv = b[field];
+  if (field === 'size' || field === 'objectCount') {
+    av = parseInt(av, 10) || 0; bv = parseInt(bv, 10) || 0;
+    return (av - bv) * dir;
+  }
+  av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase();
+  return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+}
+
+function _gcsSortIcon(state, field) {
+  const active = state.f === field;
+  const cls = active ? (state.d === 1 ? 'sort-asc' : 'sort-desc') : '';
+  const sym = active ? (state.d === 1 ? '▲' : '▼') : '⇅';
+  return { cls, icon: `<span class="sort-icon">${sym}</span>` };
+}
+
+// ── Buckets ──
+
 async function loadGCS() {
+  _gcs.bucket = null;
   $('gcs-nav').style.display = 'none';
   $('gcs-content').innerHTML = '<div class="loading">Loading buckets&hellip;</div>';
   try {
-    const buckets = await api('/api/gcs/buckets');
-    renderGCSBuckets(buckets);
+    _gcs.buckets = await api('/api/gcs/buckets');
+    renderGCSBuckets();
   } catch (e) {
     $('gcs-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
   }
 }
 
-function renderGCSBuckets(buckets) {
+function sortGCSBuckets(field) {
+  _gcs.bSort = _gcs.bSort.f === field
+    ? { f: field, d: _gcs.bSort.d * -1 }
+    : { f: field, d: 1 };
+  renderGCSBuckets();
+}
+
+function renderGCSBuckets() {
   $('gcs-nav').style.display = 'none';
+  const s = _gcs.bSort;
+  const sorted = [..._gcs.buckets].sort((a, b) => _gcsCmp(a, b, s.f, s.d));
+
+  const th = (label, field) => {
+    const { cls, icon } = _gcsSortIcon(s, field);
+    return `<th class="sortable${cls ? ' ' + cls : ''}" onclick="sortGCSBuckets('${field}')">${label} ${icon}</th>`;
+  };
+
   let rows = '';
-  for (const b of buckets) {
+  for (const b of sorted) {
     const n = JSON.stringify(b.name);
     rows += `<tr>
       <td><button class="btn-link" onclick="loadGCSObjects(${n})">${esc(b.name)}</button></td>
       <td><span class="cnt">${b.objectCount}</span></td>
       <td class="dim">${b.timeCreated ? b.timeCreated.substring(0, 10) : '&mdash;'}</td>
-      <td class="actions">
-        <button class="btn btn-danger" onclick="deleteGCSBucket(${n})">Delete</button>
-      </td>
+      <td class="actions"><button class="btn btn-danger" onclick="deleteGCSBucket(${n})">Delete</button></td>
     </tr>`;
   }
   $('gcs-content').innerHTML = `
     <div class="card">
-      <div class="card-header"><h2>Buckets</h2><span class="cnt">${buckets.length}</span></div>
+      <div class="card-header"><h2>Buckets</h2><span class="cnt">${sorted.length}</span></div>
       <table>
-        <thead><tr><th>Bucket</th><th>Objects</th><th>Created</th><th>Actions</th></tr></thead>
+        <thead><tr>
+          ${th('Bucket', 'name')}
+          ${th('Objects', 'objectCount')}
+          ${th('Created', 'timeCreated')}
+          <th>Actions</th>
+        </tr></thead>
         <tbody>${rows || '<tr><td colspan="4" class="empty">No buckets</td></tr>'}</tbody>
       </table>
     </div>`;
 }
 
+// ── Objects ──
+
 async function loadGCSObjects(bucket) {
+  _gcs.bucket = bucket;
+  _gcs.page = 0;
+  _gcs.oSort = { f: 'name', d: 1 };
   $('gcs-nav').style.display = 'flex';
   $('gcs-nav').innerHTML = `<a onclick="loadGCS()">Buckets</a> <span>&#8250;</span> ${esc(bucket)}`;
   $('gcs-content').innerHTML = '<div class="loading">Loading objects&hellip;</div>';
   try {
-    const objects = await api('/api/gcs/objects?' + new URLSearchParams({ bucket }));
-    renderGCSObjects(bucket, objects);
+    _gcs.objects = await api('/api/gcs/objects?' + new URLSearchParams({ bucket }));
+    renderGCSObjects();
   } catch (e) {
     $('gcs-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
   }
 }
 
-function renderGCSObjects(bucket, objects) {
+function sortGCSObjects(field) {
+  _gcs.oSort = _gcs.oSort.f === field
+    ? { f: field, d: _gcs.oSort.d * -1 }
+    : { f: field, d: 1 };
+  _gcs.page = 0;
+  renderGCSObjects();
+}
+
+function gcsChangePage(delta) {
+  const ps = _gcs.pageSize === 'all' ? _gcs.objects.length || 1 : _gcs.pageSize;
+  const maxPage = Math.max(0, Math.ceil(_gcs.objects.length / ps) - 1);
+  _gcs.page = Math.max(0, Math.min(_gcs.page + delta, maxPage));
+  renderGCSObjects();
+}
+
+function gcsSetPageSize(val) {
+  _gcs.pageSize = val === 'all' ? 'all' : parseInt(val, 10);
+  _gcs.page = 0;
+  renderGCSObjects();
+}
+
+function renderGCSObjects() {
+  const bucket = _gcs.bucket;
+  const s = _gcs.oSort;
+  const sorted = [..._gcs.objects].sort((a, b) => _gcsCmp(a, b, s.f, s.d));
+  const total = sorted.length;
+
+  const ps = _gcs.pageSize === 'all' ? (total || 1) : _gcs.pageSize;
+  const maxPage = Math.max(0, Math.ceil(total / ps) - 1);
+  _gcs.page = Math.min(_gcs.page, maxPage);
+  const start = _gcs.page * ps;
+  const page  = sorted.slice(start, start + ps);
+
+  const th = (label, field, extra = '') => {
+    const { cls, icon } = _gcsSortIcon(s, field);
+    return `<th class="sortable${cls ? ' ' + cls : ''}" onclick="sortGCSObjects('${field}')"${extra}>${label} ${icon}</th>`;
+  };
+
+  const bn = JSON.stringify(bucket);
   let rows = '';
-  for (const o of objects) {
-    const bn = JSON.stringify(bucket);
+  for (const o of page) {
     const on = JSON.stringify(o.name);
     rows += `<tr>
       <td class="mono">${esc(o.name)}</td>
-      <td class="dim">${humanSize(o.size)}</td>
+      <td class="dim" style="white-space:nowrap">${humanSize(o.size)}</td>
       <td class="dim">${esc(o.contentType || '')}</td>
-      <td class="dim">${o.updated ? o.updated.substring(0, 19).replace('T', ' ') : '&mdash;'}</td>
-      <td class="actions">
-        <button class="btn btn-danger" onclick="deleteGCSObject(${bn}, ${on})">Delete</button>
-      </td>
+      <td class="dim" style="white-space:nowrap">${o.updated ? o.updated.substring(0, 19).replace('T', ' ') : '&mdash;'}</td>
+      <td class="actions"><button class="btn btn-danger" onclick="deleteGCSObject(${bn}, ${on})">Delete</button></td>
     </tr>`;
   }
+
+  const pageSizeOpts = ['25', '50', '100', 'all'].map(v => {
+    const cur = _gcs.pageSize === (v === 'all' ? 'all' : parseInt(v, 10));
+    return `<option value="${v}"${cur ? ' selected' : ''}>${v === 'all' ? 'All' : v} / page</option>`;
+  }).join('');
+
+  const from = total === 0 ? 0 : start + 1;
+  const to   = Math.min(start + ps, total);
+  const pageInfo = total === 0 ? 'No objects' : `${from}–${to} of ${total} object${total !== 1 ? 's' : ''}`;
+  const showPager = total > 25;
+
+  const pagination = showPager ? `
+    <div class="pagination">
+      <span class="page-info">${pageInfo}</span>
+      <button class="btn btn-ghost" onclick="gcsChangePage(-1)"${_gcs.page === 0 ? ' disabled' : ''}>‹ Prev</button>
+      <button class="btn btn-ghost" onclick="gcsChangePage(1)"${_gcs.page >= maxPage ? ' disabled' : ''}>Next ›</button>
+      <select onchange="gcsSetPageSize(this.value)">${pageSizeOpts}</select>
+    </div>` : '';
+
   $('gcs-content').innerHTML = `
     <div class="card">
-      <div class="card-header"><h2>${esc(bucket)}</h2><span class="cnt">${objects.length} objects</span></div>
-      <table>
-        <thead><tr><th>Name</th><th>Size</th><th>Content-Type</th><th>Updated</th><th>Actions</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" class="empty">No objects</td></tr>'}</tbody>
-      </table>
+      <div class="card-header">
+        <h2>${esc(bucket)}</h2>
+        <span class="cnt">${total} object${total !== 1 ? 's' : ''}</span>
+        ${!showPager && total > 0 ? `<span class="dim" style="margin-left:.5rem;font-size:.8rem">${pageInfo}</span>` : ''}
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            ${th('Name', 'name')}
+            ${th('Size', 'size')}
+            ${th('Content-Type', 'contentType', ' style="min-width:130px"')}
+            ${th('Updated', 'updated')}
+            <th>Actions</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="empty">No objects</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${pagination}
     </div>`;
 }
 
@@ -496,7 +633,9 @@ async function deleteGCSObject(bucket, name) {
   if (!confirm(`Delete object "${name}"?`)) return;
   try {
     await api('/api/gcs/objects?' + new URLSearchParams({ bucket, name }), { method: 'DELETE' });
-    loadGCSObjects(bucket);
+    // Re-fetch objects, preserving current sort and page
+    _gcs.objects = await api('/api/gcs/objects?' + new URLSearchParams({ bucket }));
+    renderGCSObjects();
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
