@@ -24,11 +24,20 @@ from localgcp.core.store import NamespacedStore
 _store = NamespacedStore("pubsub", settings.data_dir)
 
 
+def _parse_duration(s: str) -> float:
+    """Parse a GCP duration string like '10s' or '600s' into seconds."""
+    s = s.strip()
+    if s.endswith("s"):
+        return float(s[:-1])
+    return float(s)
+
+
 @dataclass
 class _Envelope:
     message: dict          # PubsubMessage dict
     ack_deadline: float = 0.0   # epoch seconds when ack expires
     delivery_attempt: int = 1
+    not_before: float = 0.0     # monotonic time before which the message should not be delivered
 
 
 _lock = threading.Lock()
@@ -75,26 +84,35 @@ def pull(sub_name: str, max_messages: int) -> list[tuple[str, dict, int]]:
         expired = [aid for aid, env in unacked.items() if env.ack_deadline < now]
         sub_data = _store.get("subscriptions", sub_name)
         dlp = (sub_data or {}).get("deadLetterPolicy")
+        rp = (sub_data or {}).get("retryPolicy")
         for aid in expired:
             env = unacked.pop(aid)
             env.delivery_attempt += 1
             if dlp and dlp.get("deadLetterTopic") and env.delivery_attempt > dlp.get("maxDeliveryAttempts", 5):
                 _route_to_dlq(dlp["deadLetterTopic"], env.message)
             else:
+                if rp:
+                    min_backoff = _parse_duration(rp.get("minimumBackoff", "10s"))
+                    max_backoff = _parse_duration(rp.get("maximumBackoff", "600s"))
+                    backoff = min(min_backoff * (2 ** (env.delivery_attempt - 2)), max_backoff)
+                    env.not_before = now + backoff
                 q.appendleft(env)
 
-        results = []
-        sub_data = _store.get("subscriptions", sub_name)
         deadline_secs = sub_data["ackDeadlineSeconds"] if sub_data else 10
 
-        for _ in range(min(max_messages, len(q))):
-            if not q:
-                break
-            env = q.popleft()
-            ack_id = str(uuid.uuid4())
-            env.ack_deadline = time.monotonic() + deadline_secs
-            unacked[ack_id] = env
-            results.append((ack_id, env.message, env.delivery_attempt))
+        results = []
+        pending = list(q)
+        q.clear()
+        for env in pending:
+            if env.not_before > now:
+                q.append(env)  # not ready yet — put back at end
+            elif len(results) < max_messages:
+                ack_id = str(uuid.uuid4())
+                env.ack_deadline = now + deadline_secs
+                unacked[ack_id] = env
+                results.append((ack_id, env.message, env.delivery_attempt))
+            else:
+                q.append(env)
 
         return results
 

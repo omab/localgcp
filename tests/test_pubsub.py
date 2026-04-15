@@ -247,6 +247,64 @@ def test_dead_letter_policy_routes_after_max_attempts(pubsub_client):
     assert dlq_msgs[0]["message"]["data"] == data
 
 
+def test_retry_policy_delays_redelivery(pubsub_client):
+    """Messages are not immediately redelivered when a retry policy is configured."""
+    topic = f"{PROJECT}/topics/retry-topic"
+    sub = f"{PROJECT}/subscriptions/retry-sub"
+
+    pubsub_client.put(f"/v1/{topic}")
+    pubsub_client.put(f"/v1/{sub}", json={
+        "name": sub, "topic": topic,
+        "retryPolicy": {"minimumBackoff": "30s", "maximumBackoff": "300s"},
+    })
+
+    data = base64.b64encode(b"retry me").decode()
+    pubsub_client.post(f"/v1/{topic}:publish", json={"messages": [{"data": data}]})
+
+    from localgcp.services.pubsub import store as ps_store
+
+    # First pull succeeds
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    msgs = r.json()["receivedMessages"]
+    assert len(msgs) == 1
+    ack_id = msgs[0]["ackId"]
+
+    # Expire deadline immediately (nack)
+    ps_store.modify_ack_deadline(sub, [ack_id], 0)
+
+    # Immediate second pull should return nothing (backoff not elapsed)
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    assert r.json()["receivedMessages"] == []
+
+
+def test_retry_policy_delivers_after_backoff(pubsub_client):
+    """After backoff elapses, message becomes available again."""
+    topic = f"{PROJECT}/topics/retry2-topic"
+    sub = f"{PROJECT}/subscriptions/retry2-sub"
+
+    pubsub_client.put(f"/v1/{topic}")
+    # Use 0s minimum backoff so backoff expires immediately
+    pubsub_client.put(f"/v1/{sub}", json={
+        "name": sub, "topic": topic,
+        "retryPolicy": {"minimumBackoff": "0s", "maximumBackoff": "0s"},
+    })
+
+    data = base64.b64encode(b"no wait").decode()
+    pubsub_client.post(f"/v1/{topic}:publish", json={"messages": [{"data": data}]})
+
+    from localgcp.services.pubsub import store as ps_store
+
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    ack_id = r.json()["receivedMessages"][0]["ackId"]
+    ps_store.modify_ack_deadline(sub, [ack_id], 0)
+
+    # With 0s backoff, redelivery is immediate
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    msgs = r.json()["receivedMessages"]
+    assert len(msgs) == 1
+    assert msgs[0]["deliveryAttempt"] == 2
+
+
 def test_delete_topic_removes_subscriptions(pubsub_client):
     topic = f"{PROJECT}/topics/del-topic"
     sub = f"{PROJECT}/subscriptions/del-sub"

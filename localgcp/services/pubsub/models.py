@@ -21,6 +21,11 @@ class DeadLetterPolicy(BaseModel):
     maxDeliveryAttempts: int = 5
 
 
+class RetryPolicy(BaseModel):
+    minimumBackoff: str = "10s"   # e.g. "10s"
+    maximumBackoff: str = "600s"  # e.g. "600s"
+
+
 class SubscriptionModel(BaseModel):
     name: str
     topic: str
@@ -31,6 +36,7 @@ class SubscriptionModel(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     enableMessageOrdering: bool = False
     deadLetterPolicy: DeadLetterPolicy | None = None
+    retryPolicy: RetryPolicy | None = None
 
 
 class PubsubMessage(BaseModel):
