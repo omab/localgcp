@@ -437,13 +437,28 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => showTab(btn.dataset.tab));
 });
 
+function _navigateHash(hash, pushState) {
+  if (hash.startsWith('gcs/')) {
+    const bucket = decodeURIComponent(hash.slice(4));
+    showTab('gcs', false);
+    loadGCSObjects(bucket, pushState);
+  } else {
+    showTab(hash || 'overview', false);
+  }
+}
+
 window.addEventListener('popstate', e => {
-  const tab = (e.state && e.state.tab) || location.hash.slice(1) || 'overview';
-  showTab(tab, false);
+  if (e.state && e.state.bucket) {
+    showTab('gcs', false);
+    loadGCSObjects(e.state.bucket, false);
+  } else {
+    const tab = (e.state && e.state.tab) || location.hash.slice(1) || 'overview';
+    showTab(tab, false);
+  }
 });
 
 // Honour hash on initial load
-{ const initial = location.hash.slice(1); if (initial) showTab(initial, false); }
+{ const initial = location.hash.slice(1); if (initial) _navigateHash(initial, false); }
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 async function loadOverview() {
@@ -533,8 +548,9 @@ function _gcsSortIcon(state, field) {
 
 // ── Buckets ──
 
-async function loadGCS() {
+async function loadGCS(pushState = true) {
   _gcs.bucket = null;
+  if (pushState) history.pushState({ tab: 'gcs' }, '', '#gcs');
   $('gcs-nav').style.display = 'none';
   $('gcs-content').innerHTML = '<div class="loading">Loading buckets&hellip;</div>';
   try {
@@ -589,10 +605,11 @@ function renderGCSBuckets() {
 
 // ── Objects ──
 
-async function loadGCSObjects(bucket) {
+async function loadGCSObjects(bucket, pushState = true) {
   _gcs.bucket = bucket;
   _gcs.page = 0;
   _gcs.oSort = { f: 'name', d: 1 };
+  if (pushState) history.pushState({ tab: 'gcs', bucket }, '', '#gcs/' + encodeURIComponent(bucket));
   $('gcs-nav').style.display = 'flex';
   $('gcs-nav').innerHTML = `<a onclick="loadGCS()">Buckets</a> <span>&#8250;</span> ${esc(bucket)}`;
   $('gcs-content').innerHTML = '<div class="loading">Loading objects&hellip;</div>';
