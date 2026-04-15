@@ -158,6 +158,7 @@ function _parseGCSHash(hash) {
 function _navigateHash(hash, pushState) {
   if (hash.startsWith('gcs/')) {
     const { bucket, prefix } = _parseGCSHash(hash);
+    loaded.gcs = true; // suppress loadGCS() — we handle the load ourselves
     showTab('gcs', false);
     loadGCSObjects(bucket, prefix, pushState);
   } else {
@@ -167,6 +168,7 @@ function _navigateHash(hash, pushState) {
 
 window.addEventListener('popstate', e => {
   if (e.state && e.state.bucket) {
+    loaded.gcs = true; // suppress loadGCS() — we handle the load ourselves
     showTab('gcs', false);
     loadGCSObjects(e.state.bucket, e.state.prefix || '', false);
   } else {
