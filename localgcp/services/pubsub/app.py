@@ -44,24 +44,28 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
-async def _dispatch_push(push_endpoint: str, sub_name: str, message: dict) -> None:
+async def _dispatch_push(push_endpoint: str, sub_name: str, ack_id: str, message: dict) -> None:
     """POST a message to a push subscription's endpoint.
 
     The payload matches the GCP Pub/Sub push message format:
         {"message": {...}, "subscription": "projects/.../subscriptions/..."}
 
-    A 2xx response from the endpoint is treated as an acknowledgement.
-    Non-2xx responses and connection errors are logged as warnings; the
-    emulator does not retry (fire-and-forget semantics).
+    A 2xx response from the endpoint is treated as an acknowledgement (ack).
+    Non-2xx responses and connection errors nack the message by setting its
+    ack deadline to 0, making it immediately eligible for redelivery.
     """
     payload = {"message": message, "subscription": sub_name}
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(push_endpoint, json=payload, timeout=10.0)
-        if resp.status_code >= 300:
+        if resp.status_code < 300:
+            ps_store.acknowledge(sub_name, [ack_id])
+        else:
             logger.warning("Push delivery to %s returned HTTP %d", push_endpoint, resp.status_code)
+            ps_store.modify_ack_deadline(sub_name, [ack_id], 0)
     except Exception as exc:
         logger.warning("Push delivery to %s failed: %s", push_endpoint, exc)
+        ps_store.modify_ack_deadline(sub_name, [ack_id], 0)
 
 
 # ---------------------------------------------------------------------------
@@ -141,11 +145,14 @@ async def publish(
                 continue
             sub_name = sub["name"]
             push_endpoint = (sub.get("pushConfig") or {}).get("pushEndpoint", "")
+            ps_store.ensure_queue(sub_name)
+            ps_store.enqueue(sub_name, msg)
             if push_endpoint:
-                background_tasks.add_task(_dispatch_push, push_endpoint, sub_name, msg)
-            else:
-                ps_store.ensure_queue(sub_name)
-                ps_store.enqueue(sub_name, msg)
+                # Pull immediately to get an ack_id so _dispatch_push can ack/nack
+                pulled = ps_store.pull(sub_name, 1)
+                if pulled:
+                    ack_id, pulled_msg, _ = pulled[0]
+                    background_tasks.add_task(_dispatch_push, push_endpoint, sub_name, ack_id, pulled_msg)
 
     return PublishResponse(messageIds=message_ids).model_dump()
 

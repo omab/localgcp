@@ -1,6 +1,7 @@
 """Tests for Cloud Pub/Sub emulator."""
+import asyncio
 import base64
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 PROJECT = "projects/local-project"
@@ -99,9 +100,10 @@ def test_push_subscription_dispatches_to_endpoint(pubsub_client):
         assert r.status_code == 200
 
     mock_push.assert_called_once()
-    endpoint, sub_name, msg = mock_push.call_args.args
+    endpoint, sub_name, ack_id, msg = mock_push.call_args.args
     assert endpoint == push_url
     assert sub_name == sub
+    assert isinstance(ack_id, str)
     assert msg["data"] == data
 
 
@@ -120,8 +122,8 @@ def test_pull_on_push_subscription_returns_400(pubsub_client):
     assert r.status_code == 400
 
 
-def test_push_subscription_not_enqueued_for_pull(pubsub_client):
-    """Push subscriptions don't enqueue messages; pull subscriptions on the same topic still do."""
+def test_push_subscription_not_pullable(pubsub_client):
+    """Push subscriptions enqueue + immediately dispatch; pull subscriptions on the same topic still work."""
     topic = f"{PROJECT}/topics/mixed-topic"
     pull_sub = f"{PROJECT}/subscriptions/mixed-pull-sub"
     push_sub = f"{PROJECT}/subscriptions/mixed-push-sub"
@@ -142,9 +144,65 @@ def test_push_subscription_not_enqueued_for_pull(pubsub_client):
     r = pubsub_client.post(f"/v1/{pull_sub}:pull", json={"maxMessages": 1})
     assert len(r.json()["receivedMessages"]) == 1
 
-    # Push sub has nothing in the pull queue (it was dispatched, not enqueued)
+    # Push sub has nothing pending in its queue (message moved to unacked for dispatch)
     from localgcp.services.pubsub.store import queue_depth
     assert queue_depth(push_sub) == 0
+
+
+async def test_push_dispatch_acks_message_on_success():
+    """_dispatch_push acks the message when the endpoint returns 2xx."""
+    from localgcp.services.pubsub import store as ps_store
+    from localgcp.services.pubsub.app import _dispatch_push
+
+    sub_name = f"{PROJECT}/subscriptions/ack-push-sub"
+    ps_store.ensure_queue(sub_name)
+    msg = {"data": "dA==", "messageId": "1", "publishTime": "2024-01-01T00:00:00Z", "attributes": {}, "orderingKey": ""}
+    ps_store.enqueue(sub_name, msg)
+    [(ack_id, pulled_msg, _)] = ps_store.pull(sub_name, 1)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    with patch("localgcp.services.pubsub.app.httpx.AsyncClient", return_value=mock_client):
+        await _dispatch_push("http://example.com/push", sub_name, ack_id, pulled_msg)
+
+    # Message should be acked — no longer in unacked
+    from localgcp.services.pubsub.store import _unacked
+    assert ack_id not in _unacked.get(sub_name, {})
+
+
+async def test_push_dispatch_requeues_message_on_failure():
+    """_dispatch_push nacks (requeues) the message when the endpoint returns non-2xx."""
+    from localgcp.services.pubsub import store as ps_store
+    from localgcp.services.pubsub.app import _dispatch_push
+
+    sub_name = f"{PROJECT}/subscriptions/nack-push-sub"
+    ps_store.ensure_queue(sub_name)
+    msg = {"data": "dA==", "messageId": "2", "publishTime": "2024-01-01T00:00:00Z", "attributes": {}, "orderingKey": ""}
+    ps_store.enqueue(sub_name, msg)
+    [(ack_id, pulled_msg, _)] = ps_store.pull(sub_name, 1)
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    with patch("localgcp.services.pubsub.app.httpx.AsyncClient", return_value=mock_client):
+        await _dispatch_push("http://example.com/push", sub_name, ack_id, pulled_msg)
+
+    # Deadline set to 0 → message immediately re-eligible; a subsequent pull should return it
+    results = ps_store.pull(sub_name, 1)
+    assert len(results) == 1
+    assert results[0][1]["messageId"] == "2"
+    assert results[0][2] == 2  # delivery_attempt incremented
 
 
 def test_delete_topic_removes_subscriptions(pubsub_client):
