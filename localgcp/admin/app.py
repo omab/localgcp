@@ -99,7 +99,7 @@ def _get_services() -> dict:
 
 @app.get("/")
 async def dashboard(request: Request):
-    return _TEMPLATES.TemplateResponse("index.html", {"request": request})
+    return _TEMPLATES.TemplateResponse(request, "index.html")
 
 
 @app.get("/api/stats")
