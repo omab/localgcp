@@ -113,6 +113,33 @@ export PUBSUB_EMULATOR_HOST=localhost:8085
 
 For REST transport, use `api_endpoint="http://localhost:8086"` in `ClientOptions`.
 
+## `gsutillocal` CLI
+
+`gsutillocal` mirrors the `gsutil` command syntax for Cloud Storage. After `uv sync`:
+
+```bash
+gsutillocal ls                              # list all buckets
+gsutillocal ls gs://my-bucket              # list objects
+gsutillocal ls -l gs://my-bucket           # long listing (size + timestamp)
+gsutillocal ls -r gs://my-bucket           # recursive
+gsutillocal mb gs://my-bucket              # create bucket
+gsutillocal mb -l US-EAST1 gs://my-bucket  # with location
+gsutillocal rb gs://my-bucket              # delete bucket
+gsutillocal cp ./file.txt gs://bucket/     # upload
+gsutillocal cp -r ./dir/ gs://bucket/dir/  # recursive upload
+gsutillocal cp gs://bucket/file.txt ./     # download
+gsutillocal cp gs://b1/obj gs://b2/obj     # GCS-to-GCS copy
+gsutillocal mv gs://b/old gs://b/new       # move / rename
+gsutillocal rm gs://bucket/file.txt        # delete object
+gsutillocal rm gs://bucket/logs/*          # wildcard delete
+gsutillocal rm -r gs://bucket              # delete all objects + bucket
+gsutillocal cat gs://bucket/file.txt       # print to stdout
+gsutillocal stat gs://bucket/file.txt      # object metadata
+gsutillocal du gs://bucket                 # disk usage
+```
+
+Global flags `-m` (parallel) and `-o` (boto options) are accepted and silently ignored for drop-in compatibility with existing scripts.
+
 ## `gcloudlocal` CLI
 
 `gcloudlocal` is a `gcloud`-compatible CLI installed as an entry point that targets the LocalGCP emulator. After `uv sync` it is available as:

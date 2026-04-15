@@ -18,6 +18,7 @@ dependencies = [
 [project.scripts]
 localgcp = "localgcp.main:main"
 gcloudlocal = "localgcp.gcloudlocal:main"
+gsutillocal = "localgcp.gsutillocal:main"
 
 [dependency-groups]
 dev = [

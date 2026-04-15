@@ -25,7 +25,7 @@ docker compose up
 uv run pytest tests/
 ```
 
-All 90 tests should pass. Tests use `pytest-asyncio` with `asyncio_mode = "auto"` (set in `pyproject.toml`). No external services required — each test file creates its own in-process test client.
+All 108 tests should pass. Tests use `pytest-asyncio` with `asyncio_mode = "auto"` (set in `pyproject.toml`). No external services required — each test file creates its own in-process test client.
 
 ## Project layout
 
@@ -34,6 +34,7 @@ localgcp/
   main.py                   Entry point — spawns all service servers concurrently
   config.py                 Settings dataclass, reads env vars
   gcloudlocal.py            gcloud-compatible CLI (installed as 'gcloudlocal' entry point)
+  gsutillocal.py            gsutil-compatible CLI for Cloud Storage (installed as 'gsutillocal')
   core/
     store.py                NamespacedStore — shared in-memory (or file-backed) state
     auth.py                 Auth middleware (no-op for local dev)
@@ -126,10 +127,11 @@ with patch("localgcp.services.scheduler.worker._dispatch", new_callable=AsyncMoc
 
 ## Entry points
 
-Two CLI entry points are installed after `uv sync`:
+Three CLI entry points are installed after `uv sync`:
 
 - `localgcp` → `localgcp.main:main` — starts all emulator services
 - `gcloudlocal` → `localgcp.gcloudlocal:main` — gcloud-compatible CLI
+- `gsutillocal` → `localgcp.gsutillocal:main` — gsutil-compatible CLI for Cloud Storage
 
 Packaging is configured in `pyproject.toml` with `[tool.uv] package = true` and hatchling as the build backend.
 
