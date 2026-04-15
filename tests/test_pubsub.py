@@ -379,6 +379,67 @@ def test_filter_not_and_or():
     assert matches('attributes.color = "green" OR attributes.color = "blue"', msg_red_large) is False
 
 
+def test_ordering_enforces_sequential_delivery(pubsub_client):
+    """With enableMessageOrdering, only one message per orderingKey is in-flight at a time."""
+    topic = f"{PROJECT}/topics/ordered-topic"
+    sub = f"{PROJECT}/subscriptions/ordered-sub"
+
+    pubsub_client.put(f"/v1/{topic}")
+    pubsub_client.put(f"/v1/{sub}", json={
+        "name": sub, "topic": topic, "enableMessageOrdering": True,
+    })
+
+    # Publish 3 messages with the same ordering key
+    for i in range(1, 4):
+        data = base64.b64encode(str(i).encode()).decode()
+        pubsub_client.post(f"/v1/{topic}:publish", json={
+            "messages": [{"data": data, "orderingKey": "key-A"}]
+        })
+
+    # First pull: should get message 1 only (key-A now in-flight)
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 10})
+    msgs = r.json()["receivedMessages"]
+    assert len(msgs) == 1
+    assert base64.b64decode(msgs[0]["message"]["data"]) == b"1"
+    ack_id = msgs[0]["ackId"]
+
+    # Second pull without ack: key-A is still in-flight → no messages
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 10})
+    assert r.json()["receivedMessages"] == []
+
+    # Ack message 1 → key-A released
+    pubsub_client.post(f"/v1/{sub}:acknowledge", json={"ackIds": [ack_id]})
+
+    # Third pull: should get message 2
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 10})
+    msgs = r.json()["receivedMessages"]
+    assert len(msgs) == 1
+    assert base64.b64decode(msgs[0]["message"]["data"]) == b"2"
+
+
+def test_ordering_different_keys_concurrent(pubsub_client):
+    """Messages with different ordering keys are delivered concurrently."""
+    topic = f"{PROJECT}/topics/multikey-topic"
+    sub = f"{PROJECT}/subscriptions/multikey-sub"
+
+    pubsub_client.put(f"/v1/{topic}")
+    pubsub_client.put(f"/v1/{sub}", json={
+        "name": sub, "topic": topic, "enableMessageOrdering": True,
+    })
+
+    # Publish one message for key-A and one for key-B
+    for key in ("key-A", "key-B"):
+        data = base64.b64encode(key.encode()).decode()
+        pubsub_client.post(f"/v1/{topic}:publish", json={
+            "messages": [{"data": data, "orderingKey": key}]
+        })
+
+    # Both messages should be deliverable in one pull since they have different keys
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 10})
+    msgs = r.json()["receivedMessages"]
+    assert len(msgs) == 2
+
+
 def test_delete_topic_removes_subscriptions(pubsub_client):
     topic = f"{PROJECT}/topics/del-topic"
     sub = f"{PROJECT}/subscriptions/del-sub"

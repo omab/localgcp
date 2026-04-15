@@ -15,7 +15,7 @@ from localgcp.services.scheduler.app import app as scheduler_app
 def reset_stores():
     """Reset all in-memory stores before each test."""
     from localgcp.services.gcs.store import get_store as gcs_store
-    from localgcp.services.pubsub.store import get_store as pubsub_store, _queues, _unacked
+    from localgcp.services.pubsub.store import get_store as pubsub_store, _queues, _unacked, _inflight_keys
     from localgcp.services.firestore.store import get_store as fs_store
     from localgcp.services.secretmanager.store import get_store as sm_store
     from localgcp.services.tasks.store import get_store as tasks_store
@@ -26,6 +26,7 @@ def reset_stores():
     pubsub_store().reset()
     _queues.clear()
     _unacked.clear()
+    _inflight_keys.clear()
     fs_store().reset()
     sm_store().reset()
     tasks_store().reset()

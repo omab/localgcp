@@ -43,6 +43,7 @@ class _Envelope:
 _lock = threading.Lock()
 _queues: dict[str, deque[_Envelope]] = {}    # sub → pending messages
 _unacked: dict[str, dict[str, _Envelope]] = {}  # sub → ack_id → envelope
+_inflight_keys: dict[str, set[str]] = {}     # sub → set of ordering keys currently unacked
 
 
 def get_store() -> NamespacedStore:
@@ -53,12 +54,14 @@ def ensure_queue(sub_name: str) -> None:
     with _lock:
         _queues.setdefault(sub_name, deque())
         _unacked.setdefault(sub_name, {})
+        _inflight_keys.setdefault(sub_name, set())
 
 
 def remove_queue(sub_name: str) -> None:
     with _lock:
         _queues.pop(sub_name, None)
         _unacked.pop(sub_name, None)
+        _inflight_keys.pop(sub_name, None)
 
 
 def enqueue(sub_name: str, message: dict) -> None:
@@ -85,9 +88,14 @@ def pull(sub_name: str, max_messages: int) -> list[tuple[str, dict, int]]:
         sub_data = _store.get("subscriptions", sub_name)
         dlp = (sub_data or {}).get("deadLetterPolicy")
         rp = (sub_data or {}).get("retryPolicy")
+        ordering = bool((sub_data or {}).get("enableMessageOrdering"))
+        inflight = _inflight_keys.setdefault(sub_name, set())
         for aid in expired:
             env = unacked.pop(aid)
             env.delivery_attempt += 1
+            key = env.message.get("orderingKey", "") if ordering else ""
+            if key:
+                inflight.discard(key)
             if dlp and dlp.get("deadLetterTopic") and env.delivery_attempt > dlp.get("maxDeliveryAttempts", 5):
                 _route_to_dlq(dlp["deadLetterTopic"], env.message)
             else:
@@ -104,12 +112,15 @@ def pull(sub_name: str, max_messages: int) -> list[tuple[str, dict, int]]:
         pending = list(q)
         q.clear()
         for env in pending:
-            if env.not_before > now:
-                q.append(env)  # not ready yet — put back at end
+            key = env.message.get("orderingKey", "") if ordering else ""
+            if env.not_before > now or (key and key in inflight):
+                q.append(env)  # not ready yet or blocked by in-flight key — keep in queue
             elif len(results) < max_messages:
                 ack_id = str(uuid.uuid4())
                 env.ack_deadline = now + deadline_secs
                 unacked[ack_id] = env
+                if key:
+                    inflight.add(key)
                 results.append((ack_id, env.message, env.delivery_attempt))
             else:
                 q.append(env)
@@ -120,8 +131,15 @@ def pull(sub_name: str, max_messages: int) -> list[tuple[str, dict, int]]:
 def acknowledge(sub_name: str, ack_ids: list[str]) -> None:
     with _lock:
         unacked = _unacked.get(sub_name, {})
+        inflight = _inflight_keys.get(sub_name, set())
+        sub_data = _store.get("subscriptions", sub_name)
+        ordering = bool((sub_data or {}).get("enableMessageOrdering"))
         for aid in ack_ids:
-            unacked.pop(aid, None)
+            env = unacked.pop(aid, None)
+            if env and ordering:
+                key = env.message.get("orderingKey", "")
+                if key:
+                    inflight.discard(key)
 
 
 def modify_ack_deadline(sub_name: str, ack_ids: list[str], deadline_secs: int) -> None:
