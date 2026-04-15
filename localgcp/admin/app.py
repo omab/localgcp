@@ -419,19 +419,31 @@ const loaders = {
   scheduler: loadScheduler,
 };
 
+function showTab(tab, pushState = true) {
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if (!btn) return;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  $('panel-' + tab).classList.add('active');
+  if (pushState) history.pushState({ tab }, '', '#' + tab);
+  if (!loaded[tab] || tab === 'overview') {
+    loaded[tab] = true;
+    loaders[tab]();
+  }
+}
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.tab;
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    $('panel-' + tab).classList.add('active');
-    if (!loaded[tab] || tab === 'overview') {
-      loaded[tab] = true;
-      loaders[tab]();
-    }
-  });
+  btn.addEventListener('click', () => showTab(btn.dataset.tab));
 });
+
+window.addEventListener('popstate', e => {
+  const tab = (e.state && e.state.tab) || location.hash.slice(1) || 'overview';
+  showTab(tab, false);
+});
+
+// Honour hash on initial load
+{ const initial = location.hash.slice(1); if (initial) showTab(initial, false); }
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 async function loadOverview() {
