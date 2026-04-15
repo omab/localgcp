@@ -23,6 +23,9 @@ Services supported:
     tasks       queues list/create/describe/delete/pause/resume/purge
                 tasks  list/create/describe/delete/run
 
+gsutil shortcuts (flat syntax, same as gsutillocal):
+    ls, cp, mv, mb, rb, rm, cat, stat, du
+
 Environment variables:
     LOCALGCP_PROJECT         default project  (default: local-project)
     LOCALGCP_LOCATION        default location (default: us-central1)
@@ -808,6 +811,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ttrun.add_argument("queue")
     p_ttrun.add_argument("task")
 
+    # --- gsutil shortcuts ---
+    from localgcp.gsutillocal import register_subparsers as _register_gsutil
+    _register_gsutil(svc)
+
     return root
 
 
@@ -873,6 +880,9 @@ _DISPATCH = {
 }
 
 
+_GSUTIL_SHORTCUTS = frozenset(("ls", "cp", "mv", "mb", "rb", "rm", "cat", "stat", "du"))
+
+
 def main() -> None:
     global _output_format
 
@@ -883,6 +893,17 @@ def main() -> None:
     kwargs = vars(args)
 
     service = kwargs.get("service")
+
+    # gsutil-style flat commands (ls, cp, mv, mb, rb, rm, cat, stat, du)
+    if service in _GSUTIL_SHORTCUTS:
+        from localgcp.gsutillocal import _COMMANDS as _gsutil_cmds
+        # Provide defaults for flags that gsutillocal subparsers may not set
+        # when called through gcloudlocal (where the dest key is 'service'
+        # rather than 'command').
+        args.command = service
+        _gsutil_cmds[service](args)
+        return
+
     resource = kwargs.get("resource")
     verb = kwargs.get("verb")
 

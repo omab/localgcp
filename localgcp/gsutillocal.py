@@ -301,6 +301,48 @@ def _du_bucket(c, bucket: str, prefix: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def register_subparsers(sub) -> None:
+    """Register all gsutil-style subcommands onto an existing subparsers group.
+
+    Called both by gsutillocal's own parser and by gcloudlocal so the same
+    commands are available under both CLIs without duplicating parser code.
+    """
+    p_ls = sub.add_parser("ls", help="List buckets or objects")
+    p_ls.add_argument("uri", nargs="?", metavar="gs://bucket[/prefix]")
+    p_ls.add_argument("-l", dest="long", action="store_true", help="Long listing")
+    p_ls.add_argument("-r", dest="recursive", action="store_true", help="Recursive")
+
+    p_cp = sub.add_parser("cp", help="Copy files (upload / download / GCS-to-GCS)")
+    p_cp.add_argument("src", metavar="SRC")
+    p_cp.add_argument("dst", metavar="DST")
+    p_cp.add_argument("-r", "-R", dest="recursive", action="store_true", help="Recursive")
+
+    p_mv = sub.add_parser("mv", help="Move / rename objects")
+    p_mv.add_argument("src", metavar="gs://bucket/src")
+    p_mv.add_argument("dst", metavar="gs://bucket/dst")
+
+    p_mb = sub.add_parser("mb", help="Make bucket")
+    p_mb.add_argument("bucket", metavar="gs://bucket")
+    p_mb.add_argument("-l", dest="location", metavar="LOCATION", default="",
+                      help="Bucket location (e.g. US-CENTRAL1)")
+
+    p_rb = sub.add_parser("rb", help="Remove bucket")
+    p_rb.add_argument("bucket", metavar="gs://bucket")
+
+    p_rm = sub.add_parser("rm", help="Remove objects")
+    p_rm.add_argument("uris", metavar="gs://bucket/object", nargs="+")
+    p_rm.add_argument("-r", "-R", dest="recursive", action="store_true", help="Recursive")
+
+    p_cat = sub.add_parser("cat", help="Output object content to stdout")
+    p_cat.add_argument("uri", metavar="gs://bucket/object")
+
+    p_stat = sub.add_parser("stat", help="Display object status / metadata")
+    p_stat.add_argument("uri", metavar="gs://bucket/object")
+
+    p_du = sub.add_parser("du", help="Display object size usage")
+    p_du.add_argument("uri", nargs="?", metavar="gs://bucket[/prefix]")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="gsutillocal",
@@ -314,51 +356,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
-
-    # ls
-    p_ls = sub.add_parser("ls", help="List buckets or objects")
-    p_ls.add_argument("uri", nargs="?", metavar="gs://bucket[/prefix]")
-    p_ls.add_argument("-l", dest="long", action="store_true", help="Long listing")
-    p_ls.add_argument("-r", dest="recursive", action="store_true", help="Recursive")
-
-    # cp
-    p_cp = sub.add_parser("cp", help="Copy files (upload / download / GCS-to-GCS)")
-    p_cp.add_argument("src", metavar="SRC")
-    p_cp.add_argument("dst", metavar="DST")
-    p_cp.add_argument("-r", "-R", dest="recursive", action="store_true", help="Recursive")
-
-    # mv
-    p_mv = sub.add_parser("mv", help="Move / rename objects")
-    p_mv.add_argument("src", metavar="gs://bucket/src")
-    p_mv.add_argument("dst", metavar="gs://bucket/dst")
-
-    # mb
-    p_mb = sub.add_parser("mb", help="Make bucket")
-    p_mb.add_argument("bucket", metavar="gs://bucket")
-    p_mb.add_argument("-l", dest="location", metavar="LOCATION", default="",
-                      help="Bucket location (e.g. US-CENTRAL1)")
-
-    # rb
-    p_rb = sub.add_parser("rb", help="Remove bucket")
-    p_rb.add_argument("bucket", metavar="gs://bucket")
-
-    # rm
-    p_rm = sub.add_parser("rm", help="Remove objects")
-    p_rm.add_argument("uris", metavar="gs://bucket/object", nargs="+")
-    p_rm.add_argument("-r", "-R", dest="recursive", action="store_true", help="Recursive")
-
-    # cat
-    p_cat = sub.add_parser("cat", help="Output object content to stdout")
-    p_cat.add_argument("uri", metavar="gs://bucket/object")
-
-    # stat
-    p_stat = sub.add_parser("stat", help="Display object status / metadata")
-    p_stat.add_argument("uri", metavar="gs://bucket/object")
-
-    # du
-    p_du = sub.add_parser("du", help="Display object size usage")
-    p_du.add_argument("uri", nargs="?", metavar="gs://bucket[/prefix]")
-
+    register_subparsers(sub)
     return p
 
 
