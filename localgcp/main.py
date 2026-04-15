@@ -26,6 +26,7 @@ _SERVICES = [
     ("secretmanager", "Secret Manager",   lambda: settings.secretmanager_port),
     ("tasks",         "Cloud Tasks",      lambda: settings.tasks_port),
     ("bigquery",      "BigQuery",         lambda: settings.bigquery_port),
+    ("scheduler",     "Cloud Scheduler",  lambda: settings.scheduler_port),
     ("admin",         "Admin UI",         lambda: settings.admin_port),
 ]
 
@@ -37,6 +38,7 @@ def _build_configs() -> list[tuple[str, uvicorn.Config]]:
     from localgcp.services.secretmanager.app import app as secretmanager_app
     from localgcp.services.tasks.app import app as tasks_app
     from localgcp.services.bigquery.app import app as bigquery_app
+    from localgcp.services.scheduler.app import app as scheduler_app
     from localgcp.admin.app import app as admin_app
 
     apps = {
@@ -46,6 +48,7 @@ def _build_configs() -> list[tuple[str, uvicorn.Config]]:
         "secretmanager": secretmanager_app,
         "tasks": tasks_app,
         "bigquery": bigquery_app,
+        "scheduler": scheduler_app,
         "admin": admin_app,
     }
 
@@ -93,6 +96,7 @@ async def _serve_all(configs: list[tuple[str, uvicorn.Config]]) -> None:
 
     # Build and start the Pub/Sub gRPC server
     from localgcp.services.pubsub.grpc_server import create_server as create_pubsub_grpc
+    from localgcp.services.scheduler.worker import dispatch_loop as scheduler_loop
     grpc_server = await create_pubsub_grpc(settings.host, settings.pubsub_port)
 
     loop = asyncio.get_running_loop()
@@ -111,6 +115,7 @@ async def _serve_all(configs: list[tuple[str, uvicorn.Config]]) -> None:
     await asyncio.gather(
         *[s.serve() for s in servers],
         grpc_server.wait_for_termination(),
+        scheduler_loop(),
     )
 
 

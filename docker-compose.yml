@@ -11,6 +11,7 @@ services:
       - "8090:8090"   # Secret Manager
       - "8123:8123"   # Cloud Tasks
       - "9050:9050"   # BigQuery
+      - "8091:8091"   # Cloud Scheduler
       - "8888:8888"   # Admin UI
     environment:
       - LOCALGCP_PROJECT=local-project

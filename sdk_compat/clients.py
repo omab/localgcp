@@ -156,6 +156,7 @@ def tasks_client():
 
 
 _BQ_PORT = int(os.environ.get("LOCALGCP_BIGQUERY_PORT", "9050"))
+_SCHEDULER_PORT = int(os.environ.get("LOCALGCP_SCHEDULER_PORT", "8091"))
 
 
 def bigquery_client():
@@ -173,4 +174,16 @@ def bigquery_client():
         client_options=options.ClientOptions(
             api_endpoint=f"http://{_HOST}:{_BQ_PORT}",
         ),
+    )
+
+
+def scheduler_client():
+    """Return a CloudSchedulerClient pointed at LocalGCP."""
+    from google.cloud import scheduler_v1
+    from google.api_core import client_options as options
+
+    return scheduler_v1.CloudSchedulerClient(
+        client_options=options.ClientOptions(
+            api_endpoint=f"http://{_HOST}:{_SCHEDULER_PORT}",
+        )
     )

@@ -300,6 +300,119 @@ def test_list_tabledata(bq_client):
     assert len(r.json()["rows"]) == 1
 
 
+def test_dml_insert_via_jobs(bq_client):
+    """INSERT via the jobs API returns DONE with numDmlAffectedRows."""
+    _setup_table(bq_client)
+    r = bq_client.post(
+        f"{BASE}/jobs",
+        json={
+            "configuration": {
+                "query": {
+                    "query": 'INSERT INTO "myds"."users" VALUES (99, \'Eve\', 5.5)',
+                    "useLegacySql": False,
+                }
+            }
+        },
+    )
+    assert r.status_code == 200
+    job = r.json()
+    assert job["status"]["state"] == "DONE"
+    assert job["status"]["errorResult"] is None
+    assert job["statistics"]["query"]["numDmlAffectedRows"] == "1"
+
+    # Row should be queryable
+    r2 = bq_client.post(
+        f"{BASE}/jobs",
+        json={"configuration": {"query": {"query": 'SELECT name FROM "myds"."users"', "useLegacySql": False}}},
+    )
+    result = bq_client.get(f"{BASE}/queries/{r2.json()['jobReference']['jobId']}")
+    assert result.json()["rows"][0]["f"][0]["v"] == "Eve"
+
+
+def test_dml_update_via_jobs(bq_client):
+    """UPDATE via the jobs API returns the affected row count."""
+    _setup_table(bq_client)
+    # Seed a row via streaming insert
+    bq_client.post(
+        f"{BASE}/datasets/myds/tables/users/insertAll",
+        json={"rows": [{"insertId": "u1", "json": {"id": 1, "name": "Alice", "score": 9.0}}]},
+    )
+    r = bq_client.post(
+        f"{BASE}/jobs",
+        json={
+            "configuration": {
+                "query": {
+                    "query": 'UPDATE "myds"."users" SET score = 10.0 WHERE id = 1',
+                    "useLegacySql": False,
+                }
+            }
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["statistics"]["query"]["numDmlAffectedRows"] == "1"
+
+
+def test_dml_delete_via_jobs(bq_client):
+    """DELETE via the jobs API returns the affected row count."""
+    _setup_table(bq_client)
+    bq_client.post(
+        f"{BASE}/datasets/myds/tables/users/insertAll",
+        json={"rows": [{"insertId": "d1", "json": {"id": 2, "name": "Bob", "score": 7.0}}]},
+    )
+    r = bq_client.post(
+        f"{BASE}/jobs",
+        json={
+            "configuration": {
+                "query": {
+                    "query": 'DELETE FROM "myds"."users" WHERE id = 2',
+                    "useLegacySql": False,
+                }
+            }
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["statistics"]["query"]["numDmlAffectedRows"] == "1"
+
+    # Row should be gone
+    r2 = bq_client.post(
+        f"{BASE}/jobs",
+        json={"configuration": {"query": {"query": 'SELECT * FROM "myds"."users"', "useLegacySql": False}}},
+    )
+    result = bq_client.get(f"{BASE}/queries/{r2.json()['jobReference']['jobId']}")
+    assert result.json()["totalRows"] == "0"
+
+
+def test_ddl_create_table_as_select(bq_client):
+    """CREATE TABLE AS SELECT creates a new table from query results."""
+    _setup_table(bq_client)
+    bq_client.post(
+        f"{BASE}/datasets/myds/tables/users/insertAll",
+        json={"rows": [{"insertId": "c1", "json": {"id": 3, "name": "Carol", "score": 8.0}}]},
+    )
+    # Create a derived table via CTAS
+    r = bq_client.post(
+        f"{BASE}/jobs",
+        json={
+            "configuration": {
+                "query": {
+                    "query": 'CREATE TABLE "myds"."top_users" AS SELECT id, name FROM "myds"."users" WHERE score > 7',
+                    "useLegacySql": False,
+                }
+            }
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["status"]["state"] == "DONE"
+
+    # New table should be queryable
+    r2 = bq_client.post(
+        f"{BASE}/jobs",
+        json={"configuration": {"query": {"query": 'SELECT * FROM "myds"."top_users"', "useLegacySql": False}}},
+    )
+    result = bq_client.get(f"{BASE}/queries/{r2.json()['jobReference']['jobId']}")
+    assert result.json()["totalRows"] == "1"
+
+
 def test_insert_rows_missing_table_returns_404(bq_client):
     _setup_dataset(bq_client)
     r = bq_client.post(

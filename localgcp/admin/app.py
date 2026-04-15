@@ -43,6 +43,12 @@ def _get_services() -> dict:
         for d in bq_datasets
     )
 
+    from localgcp.services.scheduler.store import get_store as scheduler_store
+    sched = scheduler_store()
+    sched_jobs = sched.list("jobs")
+    sched_enabled = sum(1 for j in sched_jobs if j.get("state") == "ENABLED")
+    sched_paused = sum(1 for j in sched_jobs if j.get("state") == "PAUSED")
+
     return {
         "gcs": {
             "port": settings.gcs_port,
@@ -74,6 +80,11 @@ def _get_services() -> dict:
             "port": settings.bigquery_port,
             "stats": {"datasets": len(bq_datasets), "tables": bq_table_count},
             "docs_url": f"http://localhost:{settings.bigquery_port}/docs",
+        },
+        "scheduler": {
+            "port": settings.scheduler_port,
+            "stats": {"jobs": len(sched_jobs), "enabled": sched_enabled, "paused": sched_paused},
+            "docs_url": f"http://localhost:{settings.scheduler_port}/docs",
         },
     }
 
@@ -213,6 +224,7 @@ _HTML = """<!DOCTYPE html>
   <button class="tab-btn" data-tab="secrets">Secret Manager</button>
   <button class="tab-btn" data-tab="tasks">Cloud Tasks</button>
   <button class="tab-btn" data-tab="bigquery">BigQuery</button>
+  <button class="tab-btn" data-tab="scheduler">Cloud Scheduler</button>
 </nav>
 
 <main>
@@ -251,6 +263,10 @@ _HTML = """<!DOCTYPE html>
 <div id="panel-bigquery" class="panel">
   <div id="bq-nav" class="breadcrumb" style="display:none"></div>
   <div id="bq-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-scheduler" class="panel">
+  <div id="sched-content"><div class="loading">Loading&hellip;</div></div>
 </div>
 
 </main>
@@ -313,13 +329,14 @@ function closeOverlay(id) { $(id).classList.remove('open'); }
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 const loaders = {
-  overview: loadOverview,
-  gcs:      loadGCS,
-  pubsub:   loadPubSub,
+  overview:  loadOverview,
+  gcs:       loadGCS,
+  pubsub:    loadPubSub,
   firestore: loadFirestore,
-  secrets:  loadSecrets,
-  tasks:    loadTasks,
-  bigquery: loadBigQuery,
+  secrets:   loadSecrets,
+  tasks:     loadTasks,
+  bigquery:  loadBigQuery,
+  scheduler: loadScheduler,
 };
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -344,7 +361,7 @@ async function loadOverview() {
     const labels = {
       gcs: 'Cloud Storage', pubsub: 'Cloud Pub/Sub',
       firestore: 'Cloud Firestore', secretmanager: 'Secret Manager', tasks: 'Cloud Tasks',
-      bigquery: 'BigQuery',
+      bigquery: 'BigQuery', scheduler: 'Cloud Scheduler',
     };
     let rows = '';
     for (const [svc, info] of Object.entries(d.services || {})) {
@@ -1027,6 +1044,80 @@ async function deleteBQTable(dataset, table) {
   } catch (e) { alert('Delete failed: ' + e.message); }
 }
 
+// ── Scheduler ─────────────────────────────────────────────────────────────────
+async function loadScheduler() {
+  $('sched-content').innerHTML = '<div class="loading">Loading jobs&hellip;</div>';
+  try {
+    const jobs = await api('/api/scheduler/jobs');
+    renderSchedulerJobs(jobs);
+  } catch (e) {
+    $('sched-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderSchedulerJobs(jobs) {
+  let rows = '';
+  for (const j of jobs) {
+    const name = j.name || '';
+    const id = name.split('/').pop();
+    const n = JSON.stringify(id);
+    const stateTag = `<span class="state ${stateClass(j.state)}">${esc(j.state || 'UNKNOWN')}</span>`;
+    const last = j.lastAttemptTime ? j.lastAttemptTime.substring(0, 19).replace('T', ' ') : '&mdash;';
+    const paused = (j.state || '') === 'PAUSED';
+    rows += `<tr>
+      <td class="mono">${esc(id)}</td>
+      <td class="mono dim">${esc(j.schedule || '')}</td>
+      <td>${stateTag}</td>
+      <td class="dim">${last}</td>
+      <td class="actions">
+        <button class="btn btn-ghost" onclick="runSchedJob(${n})" title="Force run">Run</button>
+        ${paused
+          ? `<button class="btn btn-secondary" onclick="resumeSchedJob(${n})">Resume</button>`
+          : `<button class="btn btn-ghost" onclick="pauseSchedJob(${n})">Pause</button>`}
+        <button class="btn btn-danger" onclick="deleteSchedJob(${n})">Delete</button>
+      </td>
+    </tr>`;
+  }
+  $('sched-content').innerHTML = `
+    <div class="card">
+      <div class="card-header"><h2>Jobs</h2><span class="cnt">${jobs.length}</span></div>
+      <table>
+        <thead><tr><th>Job ID</th><th>Schedule</th><th>State</th><th>Last Run</th><th>Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="empty">No jobs</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+async function runSchedJob(id) {
+  try {
+    await api(`/api/scheduler/jobs/${encodeURIComponent(id)}:run`, { method: 'POST' });
+    loadScheduler();
+  } catch (e) { alert('Run failed: ' + e.message); }
+}
+
+async function pauseSchedJob(id) {
+  try {
+    await api(`/api/scheduler/jobs/${encodeURIComponent(id)}:pause`, { method: 'POST' });
+    loadScheduler();
+  } catch (e) { alert('Pause failed: ' + e.message); }
+}
+
+async function resumeSchedJob(id) {
+  try {
+    await api(`/api/scheduler/jobs/${encodeURIComponent(id)}:resume`, { method: 'POST' });
+    loadScheduler();
+  } catch (e) { alert('Resume failed: ' + e.message); }
+}
+
+async function deleteSchedJob(id) {
+  if (!confirm(`Delete job "${id}"?`)) return;
+  try {
+    await api(`/api/scheduler/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    loaded.scheduler = false;
+    loadScheduler();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadOverview();
 </script>
@@ -1396,6 +1487,81 @@ async def api_bq_delete_table(dataset: str = Query(...), table: str = Query(...)
     return {"deleted": f"{dataset}.{table}"}
 
 
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/scheduler/jobs")
+async def api_sched_jobs():
+    from localgcp.services.scheduler.store import get_store
+    store = get_store()
+    jobs = store.list("jobs")
+    return sorted(jobs, key=lambda x: x.get("name", ""))
+
+
+@app.post("/api/scheduler/jobs/{job_id}:run")
+async def api_sched_run(job_id: str):
+    import httpx
+    from localgcp.services.scheduler.store import get_store
+    from localgcp.services.scheduler.worker import _dispatch
+    store = get_store()
+    job = next(
+        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
+    )
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        await _dispatch(job)
+        job["lastAttemptTime"] = now
+        job.pop("status", None)
+    except Exception as exc:
+        job["lastAttemptTime"] = now
+        job["status"] = {"code": 2, "message": str(exc)}
+    store.set("jobs", job["name"], job)
+    return job
+
+
+@app.post("/api/scheduler/jobs/{job_id}:pause")
+async def api_sched_pause(job_id: str):
+    from localgcp.services.scheduler.store import get_store
+    store = get_store()
+    job = next(
+        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
+    )
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    job["state"] = "PAUSED"
+    store.set("jobs", job["name"], job)
+    return job
+
+
+@app.post("/api/scheduler/jobs/{job_id}:resume")
+async def api_sched_resume(job_id: str):
+    from localgcp.services.scheduler.store import get_store
+    store = get_store()
+    job = next(
+        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
+    )
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    job["state"] = "ENABLED"
+    store.set("jobs", job["name"], job)
+    return job
+
+
+@app.delete("/api/scheduler/jobs/{job_id}")
+async def api_sched_delete(job_id: str):
+    from localgcp.services.scheduler.store import get_store
+    store = get_store()
+    job = next(
+        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
+    )
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    store.delete("jobs", job["name"])
+    return Response(status_code=204)
+
+
 # ---------------------------------------------------------------------------
 # Reset endpoints
 # ---------------------------------------------------------------------------
@@ -1409,7 +1575,7 @@ async def reset_service(service: str):
 
 @app.post("/reset")
 async def reset_all():
-    for svc in ("gcs", "pubsub", "firestore", "secretmanager", "tasks", "bigquery"):
+    for svc in ("gcs", "pubsub", "firestore", "secretmanager", "tasks", "bigquery", "scheduler"):
         _reset_one(svc)
     return {"reset": "all"}
 
@@ -1435,6 +1601,9 @@ def _reset_one(service: str) -> None:
     elif service == "bigquery":
         from localgcp.services.bigquery.engine import get_engine
         get_engine().reset()
+    elif service == "scheduler":
+        from localgcp.services.scheduler.store import get_store
+        get_store().reset()
 
 
 @app.get("/health")

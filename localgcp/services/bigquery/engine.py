@@ -111,6 +111,15 @@ def _now_ms() -> str:
 # SQL rewriter
 # ------------------------------------------------------------------
 
+_SELECT_KEYWORDS = ("SELECT", "WITH", "VALUES", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")
+
+
+def _is_select(sql: str) -> bool:
+    """Return True if the SQL produces a result set (SELECT-like statements)."""
+    stripped = sql.strip().lstrip("(").upper()
+    return any(stripped.startswith(kw) for kw in _SELECT_KEYWORDS)
+
+
 def _rewrite_sql(sql: str, project: str) -> str:
     """Rewrite BigQuery SQL identifiers to DuckDB-compatible form.
 
@@ -311,15 +320,35 @@ class BigQueryEngine:
         job_ref = {"projectId": project, "jobId": job_id, "location": "US"}
 
         try:
-            columns, rows = self._select(rewritten)
-            schema_fields = [
-                {"name": name, "type": bq_type, "mode": "NULLABLE"}
-                for name, bq_type in columns
-            ]
-            bq_rows = [
-                {"f": [{"v": _serialize_value(v)} for v in row]}
-                for row in rows
-            ]
+            if _is_select(rewritten):
+                columns, rows = self._select(rewritten)
+                schema_fields = [
+                    {"name": name, "type": bq_type, "mode": "NULLABLE"}
+                    for name, bq_type in columns
+                ]
+                bq_rows = [
+                    {"f": [{"v": _serialize_value(v)} for v in row]}
+                    for row in rows
+                ]
+                num_dml_rows = None
+            else:
+                # DML (INSERT/UPDATE/DELETE) or DDL (CREATE/DROP/ALTER)
+                # DuckDB returns a Count row after DML; capture it.
+                columns, rows = self._select(rewritten)
+                num_dml_rows = rows[0][0] if rows and columns and columns[0][0] == "Count" else 0
+                schema_fields = []
+                bq_rows = []
+
+            stats: dict = {
+                "creationTime": now,
+                "startTime": now,
+                "endTime": now,
+                "totalBytesProcessed": "0",
+                "totalSlotMs": "0",
+            }
+            if num_dml_rows is not None:
+                stats["query"] = {"numDmlAffectedRows": str(num_dml_rows)}
+
             job = {
                 "kind": "bigquery#job",
                 "id": f"{project}:{job_id}",
@@ -329,13 +358,7 @@ class BigQueryEngine:
                     "query": {"query": query, "useLegacySql": use_legacy_sql},
                     "jobType": "QUERY",
                 },
-                "statistics": {
-                    "creationTime": now,
-                    "startTime": now,
-                    "endTime": now,
-                    "totalBytesProcessed": "0",
-                    "totalSlotMs": "0",
-                },
+                "statistics": stats,
                 "_result": {
                     "schema": {"fields": schema_fields},
                     "rows": bq_rows,

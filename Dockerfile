@@ -15,7 +15,7 @@ RUN uv sync --no-dev
 COPY localgcp/ localgcp/
 
 # Expose all service ports
-EXPOSE 4443 8080 8085 8090 8123 9050 8888
+EXPOSE 4443 8080 8085 8090 8123 9050 8091 8888
 
 # Health check via admin UI
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s \
