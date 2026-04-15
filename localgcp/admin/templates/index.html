@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LocalGCP Admin</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>&#x1F680; LocalGCP Admin</h1>
+    <div class="sub">Project: <code id="project-id">loading&hellip;</code></div>
+  </div>
+  <span style="margin-left:auto" class="badge">running</span>
+</header>
+
+<nav>
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="gcs">Cloud Storage</button>
+  <button class="tab-btn" data-tab="pubsub">Pub/Sub</button>
+  <button class="tab-btn" data-tab="firestore">Firestore</button>
+  <button class="tab-btn" data-tab="secrets">Secret Manager</button>
+  <button class="tab-btn" data-tab="tasks">Cloud Tasks</button>
+  <button class="tab-btn" data-tab="bigquery">BigQuery</button>
+  <button class="tab-btn" data-tab="scheduler">Cloud Scheduler</button>
+</nav>
+
+<main>
+
+<div id="panel-overview" class="panel active">
+  <div id="overview-content"><div class="loading">Loading&hellip;</div></div>
+  <div style="margin-top:1rem">
+    <button class="btn btn-ghost" onclick="resetAll()">Reset All Data</button>
+  </div>
+  <footer>LocalGCP &mdash; local emulator for GCP services</footer>
+</div>
+
+<div id="panel-gcs" class="panel">
+  <div id="gcs-nav" class="breadcrumb" style="display:none"></div>
+  <div id="gcs-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-pubsub" class="panel">
+  <div id="pubsub-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-firestore" class="panel">
+  <div id="firestore-nav" class="breadcrumb" style="display:none"></div>
+  <div id="firestore-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-secrets" class="panel">
+  <div id="secrets-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-tasks" class="panel">
+  <div id="tasks-nav" class="breadcrumb" style="display:none"></div>
+  <div id="tasks-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-bigquery" class="panel">
+  <div id="bq-nav" class="breadcrumb" style="display:none"></div>
+  <div id="bq-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+<div id="panel-scheduler" class="panel">
+  <div id="sched-content"><div class="loading">Loading&hellip;</div></div>
+</div>
+
+</main>
+
+<!-- Publish modal -->
+<div class="overlay" id="publish-overlay">
+  <div class="modal">
+    <h3>Publish Message</h3>
+    <div class="dim" style="margin-bottom:.5rem">Topic: <code id="pub-topic-label"></code></div>
+    <label>Message data (plain text)</label>
+    <textarea id="pub-data" rows="3" placeholder="Enter message content&hellip;"></textarea>
+    <label>Attributes (JSON object, optional)</label>
+    <textarea id="pub-attrs" rows="2" placeholder='{"key": "value"}'></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeOverlay('publish-overlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="doPublish()">Publish</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/admin.js"></script>
+</body>
+</html>
