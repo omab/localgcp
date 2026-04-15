@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import io
+import uuid
 from typing import Annotated
 
 from fastapi import FastAPI, Header, Query, Request, Response
@@ -17,6 +17,8 @@ from localgcp.core.middleware import add_request_logging
 from localgcp.services.gcs.models import (
     BucketListResponse,
     BucketModel,
+    Lifecycle,
+    LifecycleCondition,
     NotificationConfig,
     NotificationListResponse,
     ObjectListResponse,
@@ -68,6 +70,23 @@ async def get_bucket(bucket: str):
     return data
 
 
+@app.patch("/storage/v1/b/{bucket}")
+async def patch_bucket(bucket: str, request: Request):
+    store = _store()
+    data = store.get("buckets", bucket)
+    if data is None:
+        raise GCPError(404, "The specified bucket does not exist.")
+    body = await request.json()
+    for field in ("lifecycle", "labels", "storageClass", "location"):
+        if field in body:
+            data[field] = body[field]
+    from localgcp.services.gcs.models import _now_rfc3339
+    data["updated"] = _now_rfc3339()
+    data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
+    store.set("buckets", bucket, data)
+    return data
+
+
 @app.delete("/storage/v1/b/{bucket}", status_code=204)
 async def delete_bucket(bucket: str):
     store = _store()
@@ -93,12 +112,21 @@ async def upload_object(
     name: str = Query(default=""),
     uploadType: str = Query(default="media"),
     content_type: Annotated[str | None, Header(alias="content-type")] = None,
+    x_upload_content_type: Annotated[str | None, Header(alias="x-upload-content-type")] = None,
+    x_upload_content_length: Annotated[str | None, Header(alias="x-upload-content-length")] = None,
 ):
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, f"The specified bucket does not exist.")
 
     ct = content_type or "application/octet-stream"
+
+    if uploadType == "resumable":
+        return await _initiate_resumable(
+            request, store, bucket, name,
+            x_upload_content_type or ct,
+            int(x_upload_content_length) if x_upload_content_length else None,
+        )
 
     if uploadType == "multipart":
         # Parse multipart/related: first part is metadata JSON, second is body
@@ -116,6 +144,109 @@ async def upload_object(
         body_bytes = await request.body()
 
     return _store_object(store, bucket, obj_name, body_bytes, ct)
+
+
+async def _initiate_resumable(
+    request: Request,
+    store,
+    bucket: str,
+    name: str,
+    content_type: str,
+    total_size: int | None,
+) -> Response:
+    """Initiate a resumable upload session; returns 200 with Location header."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    obj_name = body.get("name", name)
+    if not obj_name:
+        raise GCPError(400, "name is required")
+
+    ct = body.get("contentType", content_type) or "application/octet-stream"
+    upload_id = str(uuid.uuid4())
+
+    session = {
+        "bucket": bucket,
+        "name": obj_name,
+        "content_type": ct,
+        "total_size": total_size,
+        "received": 0,
+    }
+    store.set("resumable_sessions", upload_id, session)
+    store.set("resumable_bodies", upload_id, b"")
+
+    location = f"/upload/storage/v1/b/{bucket}/o?uploadType=resumable&upload_id={upload_id}"
+    return Response(status_code=200, headers={"Location": location})
+
+
+@app.put("/upload/storage/v1/b/{bucket}/o")
+async def upload_resumable_chunk(
+    bucket: str,
+    request: Request,
+    upload_id: str = Query(...),
+    content_range: Annotated[str | None, Header(alias="content-range")] = None,
+):
+    """Upload data (or a chunk) to an active resumable session."""
+    store = _store()
+    session = store.get("resumable_sessions", upload_id)
+    if session is None:
+        raise GCPError(404, f"Upload session not found: {upload_id}")
+
+    body = await request.body()
+
+    # Parse Content-Range header (e.g. "bytes 0-999/1000" or "bytes */1000")
+    total_size = session.get("total_size")
+    is_status_query = False
+
+    if content_range:
+        if content_range.startswith("bytes */"):
+            is_status_query = True
+            try:
+                total_size = int(content_range[len("bytes */"):])
+            except ValueError:
+                pass
+        elif content_range.startswith("bytes "):
+            rest = content_range[len("bytes "):]
+            range_part, total_part = rest.split("/", 1)
+            if total_part != "*":
+                try:
+                    total_size = int(total_part)
+                except ValueError:
+                    pass
+        if total_size is not None:
+            session["total_size"] = total_size
+            store.set("resumable_sessions", upload_id, session)
+
+    # Status query (empty body, Content-Range: bytes */N)
+    if is_status_query or not body:
+        received = session["received"]
+        headers: dict[str, str] = {}
+        if received > 0:
+            headers["Range"] = f"bytes=0-{received - 1}"
+        return Response(status_code=308, headers=headers)
+
+    # Accumulate chunk
+    accumulated = (store.get("resumable_bodies", upload_id) or b"") + body
+    session["received"] = len(accumulated)
+    store.set("resumable_sessions", upload_id, session)
+    store.set("resumable_bodies", upload_id, accumulated)
+
+    # Finalize when all data is received
+    if total_size is None or len(accumulated) >= total_size:
+        obj = _store_object(
+            store, bucket, session["name"], accumulated, session["content_type"]
+        )
+        store.delete("resumable_sessions", upload_id)
+        store.delete("resumable_bodies", upload_id)
+        return obj
+
+    # More chunks expected
+    return Response(
+        status_code=308,
+        headers={"Range": f"bytes=0-{len(accumulated) - 1}"},
+    )
 
 
 def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
@@ -223,6 +354,84 @@ def _crc32c_b64(data: bytes) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle helpers
+# ---------------------------------------------------------------------------
+
+
+def _lifecycle_condition_matches(obj: dict, condition: LifecycleCondition) -> bool:
+    """Return True if the object satisfies all conditions in the lifecycle rule."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+
+    if condition.age is not None:
+        time_created_str = obj.get("timeCreated", "")
+        if not time_created_str:
+            return False
+        try:
+            tc = datetime.fromisoformat(time_created_str.replace("Z", "+00:00"))
+            if (now - tc).days < condition.age:
+                return False
+        except ValueError:
+            return False
+
+    if condition.createdBefore:
+        time_created_str = obj.get("timeCreated", "")
+        if not time_created_str:
+            return False
+        try:
+            tc = datetime.fromisoformat(time_created_str.replace("Z", "+00:00"))
+            cb = datetime.fromisoformat(condition.createdBefore.replace("Z", "+00:00"))
+            if tc >= cb:
+                return False
+        except ValueError:
+            return False
+
+    if condition.matchesStorageClass:
+        if obj.get("storageClass", "STANDARD") not in condition.matchesStorageClass:
+            return False
+
+    return True
+
+
+def _apply_lifecycle(store, bucket: str) -> None:
+    """Apply the bucket's lifecycle rules to all its objects (lazy enforcement)."""
+    bucket_data = store.get("buckets", bucket)
+    if not bucket_data:
+        return
+    lifecycle_raw = bucket_data.get("lifecycle")
+    if not lifecycle_raw:
+        return
+    lifecycle = Lifecycle(**lifecycle_raw)
+    if not lifecycle.rule:
+        return
+
+    prefix = f"{bucket}/"
+    for key in list(store.keys("objects")):
+        if not key.startswith(prefix):
+            continue
+        obj = store.get("objects", key)
+        if obj is None:
+            continue
+        for rule in lifecycle.rule:
+            cond = rule.condition
+            if not _lifecycle_condition_matches(obj, cond):
+                continue
+            action_type = rule.action.type
+            if action_type == "Delete":
+                store.delete("objects", key)
+                store.delete("bodies", key)
+                _fire_notifications(store, bucket, "OBJECT_DELETE", obj)
+                break
+            elif action_type == "SetStorageClass":
+                new_class = rule.action.storageClass
+                if new_class and obj.get("storageClass") != new_class:
+                    obj["storageClass"] = new_class
+                    store.set("objects", key, obj)
+                break
+
+
+# ---------------------------------------------------------------------------
 # Objects — metadata & download
 # ---------------------------------------------------------------------------
 
@@ -238,6 +447,8 @@ async def list_objects(
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, f"The specified bucket does not exist.")
+
+    _apply_lifecycle(store, bucket)
 
     all_keys = store.keys("objects")
     bucket_prefix = f"{bucket}/"

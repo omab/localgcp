@@ -11,6 +11,37 @@ def _now_rfc3339() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+# ---------------------------------------------------------------------------
+# Lifecycle models
+# ---------------------------------------------------------------------------
+
+
+class LifecycleAction(BaseModel):
+    type: str  # "Delete" or "SetStorageClass"
+    storageClass: str = ""  # used when type == "SetStorageClass"
+
+
+class LifecycleCondition(BaseModel):
+    age: int | None = None  # days since object creation
+    createdBefore: str = ""  # RFC3339 date; object must have been created before this
+    matchesStorageClass: list[str] = Field(default_factory=list)
+    numNewerVersions: int | None = None  # ignored (non-versioned emulator)
+
+
+class LifecycleRule(BaseModel):
+    action: LifecycleAction
+    condition: LifecycleCondition = Field(default_factory=LifecycleCondition)
+
+
+class Lifecycle(BaseModel):
+    rule: list[LifecycleRule] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Bucket / Object models
+# ---------------------------------------------------------------------------
+
+
 class BucketModel(BaseModel):
     kind: str = "storage#bucket"
     id: str = ""
@@ -25,6 +56,7 @@ class BucketModel(BaseModel):
     updated: str = Field(default_factory=_now_rfc3339)
     etag: str = "CAE="
     labels: dict[str, str] = Field(default_factory=dict)
+    lifecycle: Lifecycle | None = None
 
     def model_post_init(self, __context: Any) -> None:
         if not self.id:
@@ -41,6 +73,7 @@ class ObjectModel(BaseModel):
     generation: str = "1"
     metageneration: str = "1"
     contentType: str = "application/octet-stream"
+    storageClass: str = "STANDARD"
     size: str = "0"
     md5Hash: str = ""
     etag: str = ""
