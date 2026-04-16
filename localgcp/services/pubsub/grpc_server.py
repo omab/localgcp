@@ -17,6 +17,7 @@ REST alternative (if you prefer HTTP/1.1):
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import uuid
@@ -313,6 +314,93 @@ async def _modify_ack_deadline(request, context):
     return empty_pb2.Empty()
 
 
+async def _streaming_pull(request_iterator, context):
+    """Bidirectional streaming pull.
+
+    Protocol:
+    - Client opens the stream and sends an initial StreamingPullRequest with
+      ``subscription`` and ``stream_ack_deadline_seconds``.
+    - Server loops: pull from the in-memory queue, send StreamingPullResponse
+      batches.  When the queue is empty, sleep 50 ms before re-polling.
+    - Subsequent client messages carry ``ack_ids`` / ``modify_deadline_*``
+      fields; a background reader task processes them concurrently.
+    - The stream closes when the client disconnects (StopAsyncIteration on the
+      request iterator) or when a write to the context fails.
+    """
+    t = _types()
+    store = ps_store.get_store()
+
+    # ── first request: subscription name + optional initial acks ──────────
+    try:
+        first_req = await request_iterator.__anext__()
+    except (StopAsyncIteration, Exception):
+        return
+
+    sub_name = first_req.subscription
+    if not store.exists("subscriptions", sub_name):
+        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {sub_name}")
+        return
+
+    ps_store.ensure_queue(sub_name)
+
+    if first_req.ack_ids:
+        ps_store.acknowledge(sub_name, list(first_req.ack_ids))
+
+    # ── background reader: process acks from subsequent client messages ────
+    stop = asyncio.Event()
+
+    async def _reader():
+        try:
+            async for req in request_iterator:
+                if req.ack_ids:
+                    ps_store.acknowledge(sub_name, list(req.ack_ids))
+                for ack_id, deadline in zip(
+                    list(req.modify_deadline_ack_ids),
+                    list(req.modify_deadline_seconds),
+                ):
+                    ps_store.modify_ack_deadline(sub_name, [ack_id], int(deadline))
+        except Exception:
+            pass
+        finally:
+            stop.set()
+
+    reader = asyncio.create_task(_reader())
+    logger.info("StreamingPull opened: %s", sub_name)
+
+    # ── delivery loop ──────────────────────────────────────────────────────
+    try:
+        while not stop.is_set():
+            results = ps_store.pull(sub_name, max_messages=1000)
+            if results:
+                received = []
+                for ack_id, msg, attempt in results:
+                    data_bytes = base64.b64decode(msg["data"]) if msg.get("data") else b""
+                    pubsub_msg = t.PubsubMessage(
+                        data=data_bytes,
+                        attributes=msg.get("attributes", {}),
+                        message_id=msg.get("messageId", ""),
+                        ordering_key=msg.get("orderingKey", ""),
+                    )
+                    received.append(t.ReceivedMessage(
+                        ack_id=ack_id,
+                        message=pubsub_msg,
+                        delivery_attempt=attempt,
+                    ))
+                await context.write(t.StreamingPullResponse(received_messages=received))
+            else:
+                await asyncio.sleep(0.05)
+    except Exception:
+        pass  # client disconnected or context closed
+    finally:
+        stop.set()
+        reader.cancel()
+        try:
+            await reader
+        except asyncio.CancelledError:
+            pass
+        logger.info("StreamingPull closed: %s", sub_name)
+
+
 async def _modify_push_config(request, context):
     # Push delivery is not implemented — store the config but do nothing with it
     store = ps_store.get_store()
@@ -425,6 +513,11 @@ class _PubSubRpcHandler(grpc.GenericRpcHandler):
                 _modify_push_config,
                 request_deserializer=t.ModifyPushConfigRequest.deserialize,
                 response_serializer=_ser_empty,
+            ),
+            _s + "StreamingPull": grpc.stream_stream_rpc_method_handler(
+                _streaming_pull,
+                request_deserializer=t.StreamingPullRequest.deserialize,
+                response_serializer=t.StreamingPullResponse.serialize,
             ),
         }
 

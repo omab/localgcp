@@ -320,7 +320,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Message ordering | ✅ | One in-flight message per `orderingKey` at a time |
 | gRPC server (port 8085) | ✅ | Compatible with `PUBSUB_EMULATOR_HOST` |
 | REST server (port 8086) | ✅ | `transport="rest"` SDK clients |
-| Streaming Pull (gRPC) | ❌ | `AsyncSubscriberClient.subscribe()` not supported |
+| Streaming Pull (gRPC) | ✅ | Bidirectional stream; delivers messages, processes ack/nack/modifyDeadline |
 | Snapshots / seek | ❌ | |
 | Schema validation | ❌ | |
 | BigQuery / Cloud Storage subscriptions | ❌ | |
