@@ -1,5 +1,7 @@
 # LocalGCP
 
+[![Tests](https://github.com/omab/localgcp/actions/workflows/tests.yml/badge.svg)](https://github.com/omab/localgcp/actions/workflows/tests.yml)
+
 A local emulator for Google Cloud Platform services — like LocalStack, but for GCP.
 
 Run Cloud Storage, Pub/Sub, Firestore, Secret Manager, Cloud Tasks, BigQuery, and Cloud Scheduler entirely on your machine, with no real GCP credentials or network access required.
