@@ -143,7 +143,21 @@ async def api_gcs_buckets():
     result = []
     for b in sorted(buckets, key=lambda x: x["name"]):
         count = sum(1 for k in store.keys("objects") if k.startswith(f"{b['name']}/"))
-        result.append({**b, "objectCount": count})
+        notif_count = sum(1 for k in store.keys("notifications") if k.startswith(f"{b['name']}/"))
+        result.append({**b, "objectCount": count, "notificationCount": notif_count})
+    return result
+
+
+@app.get("/api/gcs/notifications")
+async def api_gcs_notifications(bucket: str = Query(...)):
+    from localgcp.services.gcs.store import get_store
+    store = get_store()
+    prefix = f"{bucket}/"
+    result = []
+    for k in sorted(k for k in store.keys("notifications") if k.startswith(prefix)):
+        data = store.get("notifications", k)
+        if data:
+            result.append(data)
     return result
 
 

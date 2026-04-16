@@ -85,6 +85,7 @@ const _gcs = {
   bucket: null,
   prefix: '',
   objects: [],
+  notifications: [],
   oSort: { f: 'name', d: 1 },
   page: 0,
   pageSize: 50,
@@ -194,14 +195,25 @@ async function loadOverview() {
       firestore: 'Cloud Firestore', secretmanager: 'Secret Manager', tasks: 'Cloud Tasks',
       bigquery: 'BigQuery', spanner: 'Cloud Spanner', logging: 'Cloud Logging', scheduler: 'Cloud Scheduler',
     };
+    // Map stat key → tab name (only services that have a dedicated tab)
+    const tabs = {
+      gcs: 'gcs', pubsub: 'pubsub', firestore: 'firestore',
+      secretmanager: 'secrets', tasks: 'tasks', bigquery: 'bigquery',
+      spanner: 'spanner', logging: 'logging', scheduler: 'scheduler',
+    };
     let rows = '';
     for (const [svc, info] of Object.entries(d.services || {})) {
       const statStr = Object.entries(info.stats || {})
         .map(([k, v]) => `${k}: <b>${v}</b>`).join(', ') || '<em style="color:#9aa0a6">empty</em>';
       let port = `:${info.port}`;
       if (info.grpc_port) port += ` (REST) / :${info.grpc_port} (gRPC)`;
+      const label = labels[svc] || svc;
+      const tab = tabs[svc];
+      const nameCell = tab
+        ? `<button class="btn-link" style="font-weight:600" onclick="showTab('${tab}')">${esc(label)}</button>`
+        : `<strong>${esc(label)}</strong>`;
       rows += `<tr>
-        <td><strong>${labels[svc] || svc}</strong></td>
+        <td>${nameCell}</td>
         <td class="mono dim">${port}</td>
         <td>${statStr}</td>
         <td class="actions">
@@ -295,9 +307,13 @@ function renderGCSBuckets() {
 
   let rows = '';
   for (const b of sorted) {
+    const notifBadge = b.notificationCount
+      ? `<span class="cnt" title="${b.notificationCount} notification${b.notificationCount !== 1 ? 's' : ''}">${b.notificationCount}</span>`
+      : '<span class="dim">&mdash;</span>';
     rows += `<tr>
       <td><button class="btn-link" onclick="loadGCSObjects(${_q(b.name)})">${esc(b.name)}</button></td>
       <td><span class="cnt">${b.objectCount}</span></td>
+      <td>${notifBadge}</td>
       <td class="dim">${b.timeCreated ? b.timeCreated.substring(0, 10) : '&mdash;'}</td>
       <td class="actions"><button class="btn btn-danger" onclick="deleteGCSBucket(${_q(b.name)})">Delete</button></td>
     </tr>`;
@@ -309,10 +325,11 @@ function renderGCSBuckets() {
         <thead><tr>
           ${th('Bucket', 'name')}
           ${th('Objects', 'objectCount')}
+          ${th('Notifications', 'notificationCount')}
           ${th('Created', 'timeCreated')}
           <th>Actions</th>
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" class="empty">No buckets</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="5" class="empty">No buckets</td></tr>'}</tbody>
       </table>
     </div>`;
 }
@@ -360,7 +377,10 @@ async function loadGCSObjects(bucket, prefix = '', pushState = true) {
   if (bucketChanged) {
     $('gcs-content').innerHTML = '<div class="loading">Loading objects&hellip;</div>';
     try {
-      _gcs.objects = await api('/api/gcs/objects?' + new URLSearchParams({ bucket }));
+      [_gcs.objects, _gcs.notifications] = await Promise.all([
+        api('/api/gcs/objects?' + new URLSearchParams({ bucket })),
+        api('/api/gcs/notifications?' + new URLSearchParams({ bucket })),
+      ]);
     } catch (e) {
       $('gcs-content').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
       return;
@@ -484,7 +504,34 @@ function renderGCSObjects() {
       ? `${folders.length} folder${folders.length !== 1 ? 's' : ''}`
       : `${fileTotal} file${fileTotal !== 1 ? 's' : ''}`;
 
-  $('gcs-content').innerHTML = `
+  // Build notifications card
+  let notifCard = '';
+  if (_gcs.notifications && _gcs.notifications.length > 0) {
+    let notifRows = '';
+    for (const n of _gcs.notifications) {
+      const topic = n.topic ? n.topic.replace('//pubsub.googleapis.com/', '') : '&mdash;';
+      const events = (n.event_types && n.event_types.length) ? n.event_types.join(', ') : 'ALL';
+      const prefix = n.object_name_prefix || '<em class="dim">any</em>';
+      const fmt = n.payload_format || 'JSON_API_V1';
+      notifRows += `<tr>
+        <td class="mono dim">${esc(n.id || '&mdash;')}</td>
+        <td class="mono">${esc(topic)}</td>
+        <td class="dim">${esc(events)}</td>
+        <td class="dim">${typeof prefix === 'string' ? esc(prefix) : prefix}</td>
+        <td class="dim">${esc(fmt)}</td>
+      </tr>`;
+    }
+    notifCard = `
+    <div class="card" style="margin-bottom:.75rem">
+      <div class="card-header"><h2>Notifications</h2><span class="cnt">${_gcs.notifications.length}</span></div>
+      <table>
+        <thead><tr><th>ID</th><th>Pub/Sub Topic</th><th>Event Types</th><th>Object Prefix</th><th>Format</th></tr></thead>
+        <tbody>${notifRows}</tbody>
+      </table>
+    </div>`;
+  }
+
+  $('gcs-content').innerHTML = notifCard + `
     <div class="card">
       <div class="card-header">
         <h2>${esc(bucket)}</h2>
