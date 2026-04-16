@@ -283,7 +283,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Create / get / list / delete bucket | ✅ | |
 | Upload — simple media (`uploadType=media`) | ✅ | |
 | Upload — multipart (`uploadType=multipart`) | ✅ | Metadata + body in one request |
-| Upload — resumable (`uploadType=resumable`) | ❌ | SDK default for files > 8 MiB |
+| Upload — resumable (`uploadType=resumable`) | ✅ | Single-shot and chunked; `308 Resume Incomplete` with `Range` header |
 | Download object | ✅ | Both `/o/{name}?alt=media` and `/download/` paths |
 | Get / update object metadata | ✅ | PATCH merges `contentType`, `metadata`, `cacheControl`, `contentEncoding`, `contentDisposition` |
 | Delete object | ✅ | |
@@ -298,7 +298,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Conditional requests (`If-Match`, `If-None-Match`) | ❌ | |
 | Pub/Sub notifications (bucket events) | ✅ | `OBJECT_FINALIZE`, `OBJECT_DELETE`, `OBJECT_METADATA_UPDATE` |
 | Notification config CRUD | ✅ | |
-| Object lifecycle rules | ❌ | |
+| Object lifecycle rules | ✅ | `Delete` and `SetStorageClass` actions; `age`, `createdBefore`, `matchesStorageClass` conditions; enforced on list |
 | Bucket / object ACLs | ❌ | All requests succeed regardless of caller identity |
 | IAM policies (`getIamPolicy` / `setIamPolicy`) | ❌ | |
 | Signed URLs | ❌ | |
@@ -325,7 +325,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | REST server (port 8086) | ✅ | `transport="rest"` SDK clients |
 | Streaming Pull (gRPC) | ✅ | Bidirectional stream; delivers messages, processes ack/nack/modifyDeadline |
 | Snapshots / seek | ✅ | Create/delete/list snapshots; seek to snapshot or RFC3339 timestamp |
-| Schema validation | ❌ | |
+| Schema validation | ✅ | AVRO and PROTOCOL_BUFFER schemas; CRUD + `ValidateSchema` / `ValidateMessage`; topic `schemaSettings` enforced on publish |
 | BigQuery / Cloud Storage subscriptions | ❌ | |
 | Topic message retention | ✅ | `messageRetentionDuration` honoured; messages retained in topic log |
 
