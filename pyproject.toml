@@ -47,7 +47,7 @@ packages = ["localgcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "--cov=localgcp --cov-report=term-missing --cov-report=html:htmlcov"
+addopts = "--cov=localgcp --cov-report=term-missing --cov-report=html:htmlcov --cov-report=xml"
 
 [tool.coverage.run]
 source = ["localgcp"]

@@ -1,6 +1,7 @@
 # LocalGCP
 
 [![Tests](https://github.com/omab/localgcp/actions/workflows/tests.yml/badge.svg)](https://github.com/omab/localgcp/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/omab/localgcp/branch/main/graph/badge.svg)](https://codecov.io/gh/omab/localgcp)
 
 A local emulator for Google Cloud Platform services — like LocalStack, but for GCP.
 
