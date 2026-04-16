@@ -7,6 +7,29 @@ A local emulator for Google Cloud Platform services — like LocalStack, but for
 
 Run Cloud Storage, Pub/Sub, Firestore, Secret Manager, Cloud Tasks, BigQuery, and Cloud Scheduler entirely on your machine, with no real GCP credentials or network access required.
 
+## Table of Contents
+
+- [About this project](#about-this-project)
+- [Services](#services)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Using the GCP SDK](#using-the-gcp-sdk)
+- [`gsutillocal` CLI](#gsutillocal-cli)
+- [`gcloudlocal` CLI](#gcloudlocal-cli)
+- [BigQuery](#bigquery)
+- [Cloud Scheduler](#cloud-scheduler)
+- [Development](#development)
+- [Architecture](#architecture)
+- [Feature Matrix](#feature-matrix)
+  - [Cloud Storage](#cloud-storage)
+  - [Pub/Sub](#pubsub)
+  - [Firestore](#firestore)
+  - [Secret Manager](#secret-manager)
+  - [Cloud Tasks](#cloud-tasks)
+  - [BigQuery](#bigquery-1)
+  - [Cloud Scheduler](#cloud-scheduler-1)
+- [Roadmap](#roadmap)
+
 ## About this project
 
 LocalGCP is an experiment in LLM-driven development. The entire codebase — services, tests, CLI tools, admin UI, and documentation — was written through an iterative conversation with [Claude Code](https://claude.ai/code), Anthropic's AI coding assistant, with no manual code authoring by the human developer.
