@@ -409,7 +409,8 @@
     }
 
     /* quick-start steps */
-    .steps { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .steps { display: grid; gap: 20px; grid-template-columns: repeat(2, 1fr); }
+    @media (max-width: 640px) { .steps { grid-template-columns: 1fr; } }
     .step {
       background: var(--bg);
       border: 1px solid var(--border);
@@ -693,7 +694,7 @@
 <section class="section" id="quickstart">
   <div class="inner">
     <div class="section-label"># Quick Start</div>
-    <h2 class="section-title">Up and running in seconds</h2>
+    <h2 class="section-title">Four ways to run it</h2>
     <p class="section-sub">Pull from Docker Hub, compose from source, or run locally with <code>uv</code>.</p>
 
     <div class="steps">
