@@ -570,6 +570,7 @@
       <a href="#services">Services</a>
       <a href="#quickstart">Quick Start</a>
       <a href="#sdk">SDK</a>
+      <a href="#examples">Examples</a>
       <a href="#cli">CLI</a>
       <a href="#about">About</a>
     </div>
@@ -947,8 +948,70 @@ secret = client.create_secret(
   </div>
 </section>
 
+<!-- ──────────────── EXAMPLES ──────────────── -->
+<section class="section" id="examples">
+  <div class="inner">
+    <div class="section-label"># Examples</div>
+    <h2 class="section-title">Runnable examples for every service</h2>
+    <p class="section-sub">The <code>examples/</code> directory contains self-contained scripts that target a live Cloudbox instance. Start Cloudbox, then run any example directly.</p>
+
+    <div class="code-window" style="max-width:640px;margin:0 auto 28px">
+      <div class="code-header">
+        <div class="dots">
+          <span class="dot" style="background:#f85149"></span>
+          <span class="dot" style="background:#d29922"></span>
+          <span class="dot" style="background:#3fb950"></span>
+        </div>
+        <span class="code-lang">bash</span>
+      </div>
+      <pre><code class="language-bash">uv run cloudbox &amp;
+
+uv run python examples/gcs/upload_download.py
+uv run python examples/gcs/byte_range.py
+uv run python examples/pubsub/publish_subscribe.py
+uv run python examples/firestore/queries.py
+uv run python examples/firestore/batch_write.py
+uv run python examples/bigquery/parameterized_query.py
+uv run python examples/secretmanager/secrets.py
+uv run python examples/tasks/tasks.py
+uv run python examples/scheduler/jobs.py</code></pre>
+    </div>
+
+    <div class="services-grid">
+      <div class="svc-card">
+        <div class="svc-name">Cloud Storage</div>
+        <p>upload/download · compose · byte-range downloads</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">Pub/Sub</div>
+        <p>publish · subscribe · batch with attributes</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">Firestore</div>
+        <p>CRUD · queries · cursor pagination · transactions · batchWrite</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">BigQuery</div>
+        <p>tables · streaming inserts · parameterized queries</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">Secret Manager</div>
+        <p>create · versioned payloads · access · disable</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">Cloud Tasks</div>
+        <p>queues · enqueue tasks · list · delete</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">Cloud Scheduler</div>
+        <p>cron jobs · pause · resume · delete</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ──────────────── CLI ──────────────── -->
-<section class="section" id="cli">
+<section class="section section-alt" id="cli">
   <div class="inner">
     <div class="section-label"># CLI Tools</div>
     <h2 class="section-title">Drop-in replacements for gcloud and gsutil</h2>

@@ -14,6 +14,7 @@ Run Cloud Storage, Pub/Sub, Firestore, Secret Manager, Cloud Tasks, BigQuery, Cl
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Using the GCP SDK](#using-the-gcp-sdk)
+- [Examples](#examples)
 - [`gsutillocal` CLI](#gsutillocal-cli)
 - [`gcloudlocal` CLI](#gcloudlocal-cli)
 - [BigQuery](#bigquery)
@@ -169,6 +170,45 @@ export PUBSUB_EMULATOR_HOST=localhost:8085
 ```
 
 For REST transport, use `api_endpoint="http://localhost:8086"` in `ClientOptions`.
+
+## Examples
+
+The `examples/` directory contains runnable scripts for every service. Each
+script is self-contained and targets a live Cloudbox instance via the REST APIs.
+
+```
+examples/
+  shared.py                    Base URLs and httpx client helpers
+  gcs/
+    upload_download.py         Upload, list, download, delete objects
+    compose.py                 Compose multiple objects into one
+    byte_range.py              Partial downloads via Range header
+  pubsub/
+    publish_subscribe.py       Create topic/subscription, publish, pull, ack
+    batch_publish.py           Batch publish with message attributes
+  firestore/
+    crud.py                    Create, get, field-mask update, delete
+    queries.py                 Filters, ordering, cursor pagination, aggregation
+    transactions.py            Atomic commit with field transforms
+    batch_write.py             batchWrite with per-write error handling
+  bigquery/
+    tables.py                  Create dataset/table, insert rows, query
+    parameterized_query.py     Named (@param) and positional (?) parameters
+  secretmanager/
+    secrets.py                 Create secret, add versions, access, disable
+  tasks/
+    tasks.py                   Create queue, enqueue tasks, list, delete
+  scheduler/
+    jobs.py                    Create, pause, resume, delete cron jobs
+```
+
+Start Cloudbox, then run any example from the repo root:
+
+```bash
+uv run cloudbox &
+uv run python examples/gcs/upload_download.py
+uv run python examples/firestore/queries.py
+```
 
 ## `gsutillocal` CLI
 
