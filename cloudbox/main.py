@@ -106,22 +106,27 @@ async def _serve_all(configs: list[tuple[str, uvicorn.Config]]) -> None:
     grpc_server = await create_pubsub_grpc(settings.host, settings.pubsub_port)
 
     loop = asyncio.get_running_loop()
+    scheduler_task: asyncio.Task | None = None
 
     def _shutdown(*_):
         logger.info("Shutting down Cloudbox …")
         for s in servers:
             s.should_exit = True
         asyncio.create_task(grpc_server.stop(grace=5))
+        if scheduler_task is not None:
+            scheduler_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, _shutdown)
     loop.add_signal_handler(signal.SIGTERM, _shutdown)
 
     await grpc_server.start()
+    scheduler_task = asyncio.create_task(scheduler_loop())
 
     await asyncio.gather(
         *[s.serve() for s in servers],
         grpc_server.wait_for_termination(),
-        scheduler_loop(),
+        scheduler_task,
+        return_exceptions=True,
     )
 
 
