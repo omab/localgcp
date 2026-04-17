@@ -698,7 +698,7 @@
     <div class="services-grid">
       <div class="svc-card">
         <div class="svc-name">Cloud Storage</div>
-        <p>Buckets, objects, simple / multipart / resumable uploads, notifications, lifecycle rules, gsutil-compatible CLI.</p>
+        <p>Buckets, objects, simple / multipart / resumable uploads, byte-range downloads, compose, CORS config, notifications, lifecycle rules, gsutil-compatible CLI.</p>
         <span class="svc-port">:4443 · REST</span>
       </div>
       <div class="svc-card">
@@ -708,7 +708,7 @@
       </div>
       <div class="svc-card">
         <div class="svc-name">Cloud Firestore</div>
-        <p>Documents, collections, structured queries, composite filters, transactions, field masks, batch get.</p>
+        <p>Documents, collections, structured queries, field projection, composite filters, cursor pagination, aggregation, transactions, field transforms, batchWrite.</p>
         <span class="svc-port">:8080 · REST</span>
       </div>
       <div class="svc-card">
@@ -718,12 +718,12 @@
       </div>
       <div class="svc-card">
         <div class="svc-name">Cloud Tasks</div>
-        <p>Queues, HTTP tasks, deferred scheduling, retry on failure, force-run, auto-dispatch background worker.</p>
+        <p>Queues, HTTP tasks, deferred scheduling, exponential retry backoff, force-run, auto-dispatch background worker.</p>
         <span class="svc-port">:8123 · REST</span>
       </div>
       <div class="svc-card">
         <div class="svc-name">BigQuery</div>
-        <p>Datasets, tables, SELECT / DML, streaming inserts, async jobs, CTAS — backed by DuckDB.</p>
+        <p>Datasets, tables, views, schema evolution, SELECT / DML, parameterized queries, streaming inserts, async jobs, CTAS — backed by DuckDB.</p>
         <span class="svc-port">:9050 · REST</span>
       </div>
       <div class="svc-card">
@@ -968,9 +968,12 @@ secret = client.create_secret(
 
 uv run python examples/gcs/upload_download.py
 uv run python examples/gcs/byte_range.py
+uv run python examples/gcs/cors.py
 uv run python examples/pubsub/publish_subscribe.py
-uv run python examples/firestore/queries.py
+uv run python examples/firestore/queries.py        # incl. field projection
 uv run python examples/firestore/batch_write.py
+uv run python examples/bigquery/tables.py          # incl. schema evolution
+uv run python examples/bigquery/views.py
 uv run python examples/bigquery/parameterized_query.py
 uv run python examples/secretmanager/secrets.py
 uv run python examples/tasks/tasks.py
@@ -980,7 +983,7 @@ uv run python examples/scheduler/jobs.py</code></pre>
     <div class="services-grid">
       <div class="svc-card">
         <div class="svc-name">Cloud Storage</div>
-        <p>upload/download · compose · byte-range downloads</p>
+        <p>upload/download · compose · byte-range · CORS config</p>
       </div>
       <div class="svc-card">
         <div class="svc-name">Pub/Sub</div>
@@ -988,11 +991,11 @@ uv run python examples/scheduler/jobs.py</code></pre>
       </div>
       <div class="svc-card">
         <div class="svc-name">Firestore</div>
-        <p>CRUD · queries · cursor pagination · transactions · batchWrite</p>
+        <p>CRUD · queries · field projection · cursor pagination · transactions · batchWrite</p>
       </div>
       <div class="svc-card">
         <div class="svc-name">BigQuery</div>
-        <p>tables · streaming inserts · parameterized queries</p>
+        <p>tables · schema evolution · views · parameterized queries</p>
       </div>
       <div class="svc-card">
         <div class="svc-name">Secret Manager</div>

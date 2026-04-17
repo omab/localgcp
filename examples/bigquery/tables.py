@@ -61,6 +61,34 @@ def main():
         vals = [f["v"] for f in row["f"]]
         print(f"  {vals[0]:10s}  units={vals[1]}  total=${float(vals[2]):.2f}")
 
+    # Schema evolution: add a new column via PATCH
+    r = ok(http.patch(
+        f"{BIGQUERY_BASE}/bigquery/v2/projects/{PROJECT}/datasets/{DATASET}/tables/{TABLE}",
+        json={"schema": {"fields": [
+            {"name": "product",  "type": "STRING"},
+            {"name": "quantity", "type": "INTEGER"},
+            {"name": "revenue",  "type": "FLOAT"},
+            {"name": "region",   "type": "STRING"},   # new column
+        ]}},
+    ))
+    cols = [f["name"] for f in r.json()["schema"]["fields"]]
+    print(f"\nSchema after evolution: {cols}")
+
+    # Insert a row using the new column
+    ok(http.post(
+        f"{BIGQUERY_BASE}/bigquery/v2/projects/{PROJECT}/datasets/{DATASET}/tables/{TABLE}/insertAll",
+        json={"rows": [{"insertId": "r4", "json": {"product": "Donut", "quantity": 20, "revenue": 9.80, "region": "west"}}]},
+    ))
+    r = ok(http.post(
+        f"{BIGQUERY_BASE}/bigquery/v2/projects/{PROJECT}/queries",
+        json={
+            "query": f"SELECT product, region FROM `{PROJECT}.{DATASET}.{TABLE}` WHERE region IS NOT NULL",
+            "useLegacySql": False,
+        },
+    ))
+    row = r.json()["rows"][0]
+    print(f"New row with region: product={row['f'][0]['v']}, region={row['f'][1]['v']}")
+
     # Cleanup
     http.delete(f"{BIGQUERY_BASE}/bigquery/v2/projects/{PROJECT}/datasets/{DATASET}/tables/{TABLE}")
     http.delete(f"{BIGQUERY_BASE}/bigquery/v2/projects/{PROJECT}/datasets/{DATASET}?deleteContents=true")

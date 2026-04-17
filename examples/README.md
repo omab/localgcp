@@ -27,16 +27,18 @@ examples/
     upload_download.py         Upload, list, download, delete objects
     compose.py                 Compose multiple objects into one
     byte_range.py              Partial downloads via Range header
+    cors.py                    Set, inspect, and clear bucket CORS rules
   pubsub/
     publish_subscribe.py       Create topic/subscription, publish, pull, ack
     batch_publish.py           Batch publish with message attributes
   firestore/
     crud.py                    Create, get, field-mask update, delete
-    queries.py                 Filters, ordering, cursor pagination, aggregation
+    queries.py                 Filters, ordering, cursor pagination, field projection, aggregation
     transactions.py            Atomic commit with field transforms
     batch_write.py             batchWrite with per-write error handling
   bigquery/
-    tables.py                  Create dataset/table, insert rows, query
+    tables.py                  Create dataset/table, insert rows, query, schema evolution
+    views.py                   Create, query, update, and delete views
     parameterized_query.py     Named (@param) and positional (?) parameters
   secretmanager/
     secrets.py                 Create secret, add versions, access, disable

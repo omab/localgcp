@@ -104,6 +104,17 @@ def main():
     agg = r.json()[0]["result"]["aggregateFields"]
     print(f"Food items: count={agg['food_count']['integerValue']}, price sum={agg['food_total']['integerValue']}")
 
+    # Field projection: return only 'name', not 'price' or 'category'
+    docs = query(http, {
+        "from": [{"collectionId": COLLECTION}],
+        "select": {"fields": [{"fieldPath": "name"}]},
+        "orderBy": [{"field": {"fieldPath": "name"}, "direction": "ASCENDING"}],
+    })
+    names = [d["fields"]["name"]["stringValue"] for d in docs]
+    print(f"\nAll names (projected): {names}")
+    for doc in docs:
+        assert "price" not in doc["fields"], "price should be projected out"
+
     # Cleanup
     for doc_id in ("p1", "p2", "p3", "p4", "p5"):
         http.delete(f"{FIRESTORE_BASE}/v1/{DOCS}/{COLLECTION}/{doc_id}")
