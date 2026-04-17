@@ -394,7 +394,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | `runQuery` — cursor pagination (`startAt` / `endBefore`) | ❌ | |
 | `runQuery` — field projection (`SELECT`) | ❌ | |
 | Batch write | ❌ | |
-| Field transforms (`increment`, `arrayUnion`, `arrayRemove`, `serverTimestamp`) | ❌ | |
+| Field transforms (`increment`, `arrayUnion`, `arrayRemove`, `serverTimestamp`) | ✅ | `updateTransforms` in commit writes; dotted field paths supported |
 | Aggregation queries (`COUNT`, `SUM`, `AVG`) | ❌ | |
 | Real-time listeners (`listen` endpoint) | ❌ | `on_snapshot()` / `DocumentReference.listen()` not supported |
 | Document preconditions (`exists`, `updateTime`) | ❌ | |
