@@ -918,3 +918,97 @@ def test_transform_multiple_in_one_write(firestore_client):
     assert doc["fields"]["views"]["integerValue"] == "10"
     assert doc["fields"]["label"]["stringValue"] == "new"
     assert "timestampValue" in doc["fields"]["updatedAt"]
+
+
+# ---------------------------------------------------------------------------
+# batchWrite
+# ---------------------------------------------------------------------------
+
+
+def test_batch_write_creates_and_updates(firestore_client):
+    """batchWrite can create multiple documents in one call."""
+    r = firestore_client.post(
+        f"/v1/{DB}:batchWrite",
+        json={
+            "writes": [
+                {
+                    "update": {
+                        "name": f"{DOCS}/bw/doc1",
+                        "fields": {"x": {"integerValue": "1"}},
+                    }
+                },
+                {
+                    "update": {
+                        "name": f"{DOCS}/bw/doc2",
+                        "fields": {"x": {"integerValue": "2"}},
+                    }
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["writeResults"]) == 2
+    assert len(body["status"]) == 2
+    assert body["status"][0]["code"] == 0
+    assert body["status"][1]["code"] == 0
+
+    assert firestore_client.get(f"/v1/{DOCS}/bw/doc1").json()["fields"]["x"]["integerValue"] == "1"
+    assert firestore_client.get(f"/v1/{DOCS}/bw/doc2").json()["fields"]["x"]["integerValue"] == "2"
+
+
+def test_batch_write_delete(firestore_client):
+    """batchWrite can delete documents."""
+    firestore_client.post(
+        f"/v1/{DOCS}/bwdel",
+        params={"documentId": "d1"},
+        json={"fields": {"v": {"integerValue": "1"}}},
+    )
+    r = firestore_client.post(
+        f"/v1/{DB}:batchWrite",
+        json={"writes": [{"delete": f"{DOCS}/bwdel/d1"}]},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"][0]["code"] == 0
+    assert firestore_client.get(f"/v1/{DOCS}/bwdel/d1").status_code == 404
+
+
+def test_batch_write_partial_failure(firestore_client):
+    """A failed write does not abort the remaining writes."""
+    # doc3 does not exist yet → exists=true precondition will fail
+    r = firestore_client.post(
+        f"/v1/{DB}:batchWrite",
+        json={
+            "writes": [
+                {
+                    "update": {
+                        "name": f"{DOCS}/bwpf/doc3",
+                        "fields": {"ok": {"booleanValue": False}},
+                    },
+                    "currentDocument": {"exists": True},
+                },
+                {
+                    "update": {
+                        "name": f"{DOCS}/bwpf/doc4",
+                        "fields": {"ok": {"booleanValue": True}},
+                    }
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # first write failed (doc3 doesn't exist)
+    assert body["status"][0]["code"] != 0
+    # second write succeeded independently
+    assert body["status"][1]["code"] == 0
+    assert firestore_client.get(f"/v1/{DOCS}/bwpf/doc4").json()["fields"]["ok"]["booleanValue"] is True
+
+
+def test_batch_write_empty(firestore_client):
+    """batchWrite with no writes returns empty results."""
+    r = firestore_client.post(f"/v1/{DB}:batchWrite", json={"writes": []})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["writeResults"] == []
+    assert body["status"] == []

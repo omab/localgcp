@@ -57,6 +57,16 @@ class CommitResponse(BaseModel):
     commitTime: str = ""
 
 
+class BatchWriteRequest(BaseModel):
+    writes: list[Write] = Field(default_factory=list)
+    labels: dict = Field(default_factory=dict)
+
+
+class BatchWriteResponse(BaseModel):
+    writeResults: list[dict] = Field(default_factory=list)
+    status: list[dict] = Field(default_factory=list)
+
+
 class StructuredQuery(BaseModel):
     select: dict | None = None
     from_: list[dict] | None = Field(default=None, alias="from")

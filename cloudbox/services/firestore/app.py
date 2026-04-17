@@ -25,6 +25,8 @@ from cloudbox.core.middleware import add_request_logging
 from cloudbox.services.firestore.models import (
     AggregationConfig,
     BatchGetRequest,
+    BatchWriteRequest,
+    BatchWriteResponse,
     CommitRequest,
     CommitResponse,
     Document,
@@ -32,6 +34,7 @@ from cloudbox.services.firestore.models import (
     ListDocumentsResponse,
     RunAggregationQueryRequest,
     RunQueryRequest,
+    Write,
 )
 from cloudbox.services.firestore.query import _get_field as _query_get_field
 from cloudbox.services.firestore.query import run_query
@@ -309,42 +312,89 @@ def _apply_transforms(fields: dict, transforms: list[FieldTransform], now: str) 
     return fields
 
 
+def _apply_write(store, write: Write, now: str) -> dict:
+    """Apply a single Write to the store. Returns a write-result dict.
+
+    Raises GCPError on precondition failures.
+    """
+    # currentDocument precondition
+    if write.currentDocument:
+        cd = write.currentDocument
+        doc_name = (write.update.name if write.update else write.delete) or ""
+        existing = store.get("documents", doc_name) if doc_name else None
+        if "exists" in cd:
+            if cd["exists"] and existing is None:
+                raise GCPError(404, f"Document not found: {doc_name}")
+            if not cd["exists"] and existing is not None:
+                raise GCPError(412, f"Document already exists: {doc_name}")
+        if "updateTime" in cd and (
+            existing is None or existing.get("updateTime") != cd["updateTime"]
+        ):
+            raise GCPError(412, "Precondition Failed: updateTime mismatch")
+
+    if write.update:
+        doc = write.update
+        name = doc.name
+        existing = store.get("documents", name)
+        if existing:
+            fields = dict(existing.get("fields", {}))
+            if write.updateMask:
+                for fp in write.updateMask.fieldPaths:
+                    if fp in doc.fields:
+                        fields[fp] = doc.fields[fp]
+                    else:
+                        fields.pop(fp, None)
+            else:
+                fields = dict(doc.fields)
+            updated = {**existing, "fields": fields, "updateTime": now}
+        else:
+            updated = {
+                "name": name,
+                "fields": dict(doc.fields),
+                "createTime": now,
+                "updateTime": now,
+            }
+        if write.updateTransforms:
+            updated["fields"] = _apply_transforms(updated["fields"], write.updateTransforms, now)
+        store.set("documents", name, updated)
+        return {"updateTime": now}
+
+    if write.delete:
+        store.delete("documents", write.delete)
+        return {}
+
+    return {}
+
+
 @app.post("/v1/projects/{project}/databases/{database}:commit")
 async def commit(project: str, database: str, body: CommitRequest):
     store = _store()
     now = _now()
-    write_results = []
-    for write in body.writes:
-        if write.update:
-            doc = write.update
-            name = doc.name
-            existing = store.get("documents", name)
-            if existing:
-                fields = dict(existing.get("fields", {}))
-                if write.updateMask:
-                    for fp in write.updateMask.fieldPaths:
-                        if fp in doc.fields:
-                            fields[fp] = doc.fields[fp]
-                        else:
-                            fields.pop(fp, None)
-                else:
-                    fields = dict(doc.fields)
-                updated = {**existing, "fields": fields, "updateTime": now}
-            else:
-                updated = {
-                    "name": name,
-                    "fields": dict(doc.fields),
-                    "createTime": now,
-                    "updateTime": now,
-                }
-            if write.updateTransforms:
-                updated["fields"] = _apply_transforms(updated["fields"], write.updateTransforms, now)
-            store.set("documents", name, updated)
-            write_results.append({"updateTime": now})
-        elif write.delete:
-            store.delete("documents", write.delete)
-            write_results.append({})
+    write_results = [_apply_write(store, w, now) for w in body.writes]
     return CommitResponse(writeResults=write_results, commitTime=now).model_dump()
+
+
+@app.post("/v1/projects/{project}/databases/{database}:batchWrite")
+async def batch_write(project: str, database: str, body: BatchWriteRequest):
+    """Apply writes independently — each succeeds or fails on its own."""
+    store = _store()
+    now = _now()
+    write_results: list[dict] = []
+    statuses: list[dict] = []
+
+    for write in body.writes:
+        try:
+            result = _apply_write(store, write, now)
+            write_results.append(result)
+            statuses.append({"code": 0})
+        except GCPError as exc:
+            write_results.append({})
+            statuses.append({"code": exc.status_code, "message": exc.message})
+        except Exception as exc:
+            write_results.append({})
+            statuses.append({"code": 13, "message": str(exc)})
+
+    return BatchWriteResponse(writeResults=write_results, status=statuses).model_dump()
 
 
 @app.post("/v1/projects/{project}/databases/{database}:rollback")

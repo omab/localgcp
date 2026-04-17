@@ -393,11 +393,11 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | `runQuery` — collection group queries | ✅ | `allDescendants: true` |
 | `runQuery` — cursor pagination (`startAt` / `endBefore`) | ✅ | All four variants: `startAt` (inclusive), `startAfter` (exclusive), `endBefore` (exclusive), `endAt` (inclusive); respects `orderBy` direction; composes with `limit` |
 | `runQuery` — field projection (`SELECT`) | ❌ | |
-| Batch write | ❌ | |
+| Batch write (`batchWrite`) | ✅ | Independent per-write success/failure; same semantics as `commit`; `currentDocument` preconditions supported |
 | Field transforms (`increment`, `arrayUnion`, `arrayRemove`, `serverTimestamp`) | ✅ | `updateTransforms` in commit writes; dotted field paths supported |
 | Aggregation queries (`COUNT`, `SUM`, `AVG`) | ✅ | `runAggregationQuery`; `count` (with optional `upTo`), `sum`, `avg`; multiple aggregations per request; respects `where` / `limit` from nested `structuredQuery` |
 | Real-time listeners (`listen` endpoint) | ❌ | `on_snapshot()` / `DocumentReference.listen()` not supported |
-| Document preconditions (`exists`, `updateTime`) | ❌ | |
+| Document preconditions (`exists`, `updateTime`) | ✅ | `currentDocument.exists` and `currentDocument.updateTime` checked in `commit` and `batchWrite` |
 | IAM / security rules | ❌ | All requests succeed |
 
 ### Secret Manager
