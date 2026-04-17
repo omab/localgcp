@@ -336,7 +336,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | List objects (prefix, delimiter, pagination) | ✅ | Virtual directory simulation via delimiter |
 | Copy object (within or across buckets) | ✅ | |
 | Compose objects | ✅ | Up to 32 source objects; optional `ifGenerationMatch` per source |
-| Rewrite object | ❌ | |
+| Rewrite object | ✅ | Single-shot (no resumption); supports `contentType` and `storageClass` override in request body |
 | Object versioning | ❌ | Generation number increments on overwrite but old versions are not retained |
 | MD5 hash + CRC32c checksum | ✅ | Computed and returned on upload |
 | ETag | ✅ | MD5-based |

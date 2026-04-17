@@ -778,6 +778,60 @@ async def compose_object(bucket: str, object_name: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Rewrite
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/storage/v1/b/{src_bucket}/o/{src_object:path}"
+    "/rewriteTo/b/{dst_bucket}/o/{dst_object:path}"
+)
+async def rewrite_object(
+    src_bucket: str,
+    src_object: str,
+    dst_bucket: str,
+    dst_object: str,
+    request: Request,
+):
+    """Rewrite (copy + optional metadata update) an object.
+
+    Completes in a single shot — rewriteToken is not used for resumption.
+    The response mirrors the real GCS rewrite response so the SDK's
+    polling loop terminates immediately on the first call.
+    """
+    store = _store()
+    src_key = f"{src_bucket}/{src_object}"
+    src_data = store.get("objects", src_key)
+    if src_data is None:
+        raise GCPError(404, f"No such object: {src_bucket}/{src_object}")
+    if not store.exists("buckets", dst_bucket):
+        raise GCPError(404, "The destination bucket does not exist.")
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    body_bytes = store.get("bodies", src_key) or b""
+    content_type = body.get("contentType") or src_data.get("contentType", "application/octet-stream")
+    storage_class = body.get("storageClass") or src_data.get("storageClass", "STANDARD")
+
+    dst = _store_object(store, dst_bucket, dst_object, body_bytes, content_type)
+    if storage_class != "STANDARD":
+        dst["storageClass"] = storage_class
+        store.set("objects", f"{dst_bucket}/{dst_object}", dst)
+
+    return {
+        "kind": "storage#rewriteResponse",
+        "totalBytesRewritten": str(len(body_bytes)),
+        "objectSize": str(len(body_bytes)),
+        "done": True,
+        "resource": dst,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Notification configurations
 # ---------------------------------------------------------------------------
 

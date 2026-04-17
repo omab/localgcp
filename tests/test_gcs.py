@@ -564,6 +564,64 @@ def test_if_generation_match_zero_on_upload_allows_new_object(gcs_client):
     assert r.status_code == 200
 
 
+# ---------------------------------------------------------------------------
+# Rewrite object
+# ---------------------------------------------------------------------------
+
+
+def test_rewrite_same_bucket(gcs_client):
+    _upload(gcs_client, "rwbkt", "src.txt", b"rewrite me")
+    r = gcs_client.post(
+        "/storage/v1/b/rwbkt/o/src.txt/rewriteTo/b/rwbkt/o/dst.txt",
+        json={},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["done"] is True
+    assert body["resource"]["name"] == "dst.txt"
+    assert gcs_client.get("/storage/v1/b/rwbkt/o/dst.txt?alt=media").content == b"rewrite me"
+
+
+def test_rewrite_cross_bucket(gcs_client):
+    _upload(gcs_client, "rwsrc", "obj.bin", b"cross")
+    gcs_client.post("/storage/v1/b", json={"name": "rwdst"})
+    r = gcs_client.post(
+        "/storage/v1/b/rwsrc/o/obj.bin/rewriteTo/b/rwdst/o/obj.bin",
+        json={},
+    )
+    assert r.status_code == 200
+    assert r.json()["done"] is True
+    assert gcs_client.get("/storage/v1/b/rwdst/o/obj.bin?alt=media").content == b"cross"
+
+
+def test_rewrite_changes_content_type(gcs_client):
+    _upload(gcs_client, "rwct", "f.bin", b"data")
+    r = gcs_client.post(
+        "/storage/v1/b/rwct/o/f.bin/rewriteTo/b/rwct/o/f.txt",
+        json={"contentType": "text/plain"},
+    )
+    assert r.status_code == 200
+    assert r.json()["resource"]["contentType"] == "text/plain"
+
+
+def test_rewrite_missing_source_returns_404(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "rwnone"})
+    r = gcs_client.post(
+        "/storage/v1/b/rwnone/o/ghost/rewriteTo/b/rwnone/o/dst",
+        json={},
+    )
+    assert r.status_code == 404
+
+
+def test_rewrite_missing_dst_bucket_returns_404(gcs_client):
+    _upload(gcs_client, "rwsrc2", "f.bin", b"x")
+    r = gcs_client.post(
+        "/storage/v1/b/rwsrc2/o/f.bin/rewriteTo/b/no-such-bucket/o/f.bin",
+        json={},
+    )
+    assert r.status_code == 404
+
+
 def test_if_metageneration_match_on_patch(gcs_client):
     _upload(gcs_client, "cond8", "f.bin", b"data")
     meta = gcs_client.get("/storage/v1/b/cond8/o/f.bin").json()
