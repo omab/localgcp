@@ -439,6 +439,60 @@ def test_no_range_returns_200_with_accept_ranges(gcs_client):
     assert r.content == b"hello"
 
 
+# ---------------------------------------------------------------------------
+# Compose objects
+# ---------------------------------------------------------------------------
+
+
+def test_compose_basic(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "cbkt"})
+    for i, chunk in enumerate([b"hello ", b"world", b"!"]):
+        gcs_client.post(
+            f"/upload/storage/v1/b/cbkt/o?name=part{i}&uploadType=media",
+            content=chunk, headers={"content-type": "text/plain"},
+        )
+    r = gcs_client.post(
+        "/storage/v1/b/cbkt/o/composed.txt/compose",
+        json={"sourceObjects": [{"name": "part0"}, {"name": "part1"}, {"name": "part2"}],
+              "destination": {"contentType": "text/plain"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "composed.txt"
+    body = gcs_client.get("/storage/v1/b/cbkt/o/composed.txt?alt=media").content
+    assert body == b"hello world!"
+
+
+def test_compose_missing_source_returns_404(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "cbkt2"})
+    r = gcs_client.post(
+        "/storage/v1/b/cbkt2/o/out/compose",
+        json={"sourceObjects": [{"name": "ghost"}]},
+    )
+    assert r.status_code == 404
+
+
+def test_compose_too_many_sources_returns_400(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "cbkt3"})
+    r = gcs_client.post(
+        "/storage/v1/b/cbkt3/o/out/compose",
+        json={"sourceObjects": [{"name": f"x{i}"} for i in range(33)]},
+    )
+    assert r.status_code == 400
+
+
+def test_compose_generation_match_mismatch(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "cbkt4"})
+    gcs_client.post(
+        "/upload/storage/v1/b/cbkt4/o?name=src&uploadType=media",
+        content=b"data", headers={"content-type": "text/plain"},
+    )
+    r = gcs_client.post(
+        "/storage/v1/b/cbkt4/o/out/compose",
+        json={"sourceObjects": [{"name": "src", "objectPreconditions": {"ifGenerationMatch": "999"}}]},
+    )
+    assert r.status_code == 412
+
+
 def test_range_via_download_path(gcs_client):
     _upload(gcs_client, "rbkt7", "file.bin", b"0123456789")
     r = gcs_client.get(

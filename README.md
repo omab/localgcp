@@ -335,7 +335,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Delete object | ✅ | |
 | List objects (prefix, delimiter, pagination) | ✅ | Virtual directory simulation via delimiter |
 | Copy object (within or across buckets) | ✅ | |
-| Compose objects | ❌ | |
+| Compose objects | ✅ | Up to 32 source objects; optional `ifGenerationMatch` per source |
 | Rewrite object | ❌ | |
 | Object versioning | ❌ | Generation number increments on overwrite but old versions are not retained |
 | MD5 hash + CRC32c checksum | ✅ | Computed and returned on upload |

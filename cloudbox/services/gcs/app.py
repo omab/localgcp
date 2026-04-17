@@ -634,6 +634,52 @@ async def copy_object(src_bucket: str, src_object: str, dst_bucket: str, dst_obj
 
 
 # ---------------------------------------------------------------------------
+# Compose
+# ---------------------------------------------------------------------------
+
+
+@app.post("/storage/v1/b/{bucket}/o/{object_name:path}/compose")
+async def compose_object(bucket: str, object_name: str, request: Request):
+    """Concatenate up to 32 source objects into a single destination object."""
+    store = _store()
+    if not store.exists("buckets", bucket):
+        raise GCPError(404, "The specified bucket does not exist.")
+
+    body = await request.json()
+    source_objects = body.get("sourceObjects", [])
+    if not source_objects:
+        raise GCPError(400, "sourceObjects must contain at least one entry")
+    if len(source_objects) > 32:
+        raise GCPError(400, "sourceObjects may contain at most 32 entries")
+
+    destination_meta = body.get("destination", {})
+    content_type = destination_meta.get("contentType", "application/octet-stream")
+
+    composed = b""
+    for src in source_objects:
+        src_name = src.get("name", "")
+        if not src_name:
+            raise GCPError(400, "Each sourceObject must have a name")
+        src_key = f"{bucket}/{src_name}"
+        src_data = store.get("objects", src_key)
+        if src_data is None:
+            raise GCPError(404, f"No such object: {bucket}/{src_name}")
+        # Honour optional generationMatch
+        gen_match = src.get("objectPreconditions", {}).get("ifGenerationMatch")
+        if gen_match is not None and str(src_data.get("generation")) != str(gen_match):
+            raise GCPError(412, f"Precondition failed for source object {src_name}")
+        composed += store.get("bodies", src_key) or b""
+
+    if not content_type or content_type == "application/octet-stream":
+        first_key = f"{bucket}/{source_objects[0]['name']}"
+        first_meta = store.get("objects", first_key)
+        if first_meta:
+            content_type = first_meta.get("contentType", content_type)
+
+    return _store_object(store, bucket, object_name, composed, content_type)
+
+
+# ---------------------------------------------------------------------------
 # Notification configurations
 # ---------------------------------------------------------------------------
 
