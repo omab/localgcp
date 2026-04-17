@@ -27,6 +27,7 @@ from cloudbox.services.firestore.models import (
     CommitRequest,
     CommitResponse,
     Document,
+    FieldTransform,
     ListDocumentsResponse,
     RunQueryRequest,
 )
@@ -135,6 +136,77 @@ async def begin_transaction(project: str, database: str):
     return {"transaction": base64.b64encode(txn_id).decode()}
 
 
+def _get_field(fields: dict, parts: list[str]):
+    """Return the FirestoreValue at a dotted field path, or None if missing."""
+    current = fields
+    for i, part in enumerate(parts):
+        if i == len(parts) - 1:
+            return current.get(part)
+        node = current.get(part)
+        if node is None or "mapValue" not in node:
+            return None
+        current = node["mapValue"].get("fields", {})
+    return None
+
+
+def _set_field(fields: dict, parts: list[str], value: dict) -> None:
+    """Set a FirestoreValue at a dotted field path, creating map nodes as needed."""
+    current = fields
+    for i, part in enumerate(parts):
+        if i == len(parts) - 1:
+            current[part] = value
+            return
+        if part not in current or "mapValue" not in current[part]:
+            current[part] = {"mapValue": {"fields": {}}}
+        current = current[part]["mapValue"]["fields"]
+
+
+def _apply_transforms(fields: dict, transforms: list[FieldTransform], now: str) -> dict:
+    """Apply field transforms to a document fields dict. Returns a new fields dict."""
+    fields = dict(fields)
+    for t in transforms:
+        parts = t.fieldPath.split(".")
+
+        if t.setToServerValue == "REQUEST_TIME":
+            _set_field(fields, parts, {"timestampValue": now})
+
+        elif t.increment is not None:
+            existing = _get_field(fields, parts)
+            if "integerValue" in t.increment:
+                delta = int(t.increment["integerValue"])
+                if existing and "doubleValue" in existing:
+                    _set_field(fields, parts, {"doubleValue": existing["doubleValue"] + delta})
+                else:
+                    base = int(existing["integerValue"]) if existing and "integerValue" in existing else 0
+                    _set_field(fields, parts, {"integerValue": str(base + delta)})
+            elif "doubleValue" in t.increment:
+                delta = float(t.increment["doubleValue"])
+                if existing and "integerValue" in existing:
+                    _set_field(fields, parts, {"doubleValue": int(existing["integerValue"]) + delta})
+                elif existing and "doubleValue" in existing:
+                    _set_field(fields, parts, {"doubleValue": existing["doubleValue"] + delta})
+                else:
+                    _set_field(fields, parts, {"doubleValue": delta})
+
+        elif t.appendMissingElements is not None:
+            existing = _get_field(fields, parts)
+            existing_vals = existing.get("arrayValue", {}).get("values", []) if existing else []
+            result = list(existing_vals)
+            for v in t.appendMissingElements.get("values", []):
+                if v not in result:
+                    result.append(v)
+            _set_field(fields, parts, {"arrayValue": {"values": result}})
+
+        elif t.removeAllFromArray is not None:
+            existing = _get_field(fields, parts)
+            existing_vals = existing.get("arrayValue", {}).get("values", []) if existing else []
+            to_remove = t.removeAllFromArray.get("values", [])
+            result = [v for v in existing_vals if v not in to_remove]
+            _set_field(fields, parts, {"arrayValue": {"values": result}})
+
+    return fields
+
+
 @app.post("/v1/projects/{project}/databases/{database}:commit")
 async def commit(project: str, database: str, body: CommitRequest):
     store = _store()
@@ -163,6 +235,8 @@ async def commit(project: str, database: str, body: CommitRequest):
                     "createTime": now,
                     "updateTime": now,
                 }
+            if write.updateTransforms:
+                updated["fields"] = _apply_transforms(updated["fields"], write.updateTransforms, now)
             store.set("documents", name, updated)
             write_results.append({"updateTime": now})
         elif write.delete:

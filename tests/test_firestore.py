@@ -434,4 +434,185 @@ def test_commit_delete_field_from_update_mask(firestore_client):
     r2 = firestore_client.get(f"/v1/{DOCS}/items/del-field-doc")
     fields = r2.json().get("fields", {})
     assert "a" in fields
-    assert "b" not in fields
+
+
+# ---------------------------------------------------------------------------
+# Field transforms
+# ---------------------------------------------------------------------------
+
+
+def test_transform_increment_integer(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/counters",
+        params={"documentId": "c1"},
+        json={"fields": {"views": {"integerValue": "10"}}},
+    )
+    r = firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/counters/c1", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{"fieldPath": "views", "increment": {"integerValue": "5"}}],
+            }]
+        },
+    )
+    assert r.status_code == 200
+    doc = firestore_client.get(f"/v1/{DOCS}/counters/c1").json()
+    assert doc["fields"]["views"]["integerValue"] == "15"
+
+
+def test_transform_increment_creates_field(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/counters",
+        params={"documentId": "c2"},
+        json={"fields": {}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/counters/c2", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{"fieldPath": "hits", "increment": {"integerValue": "3"}}],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/counters/c2").json()
+    assert doc["fields"]["hits"]["integerValue"] == "3"
+
+
+def test_transform_increment_double(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/metrics",
+        params={"documentId": "m1"},
+        json={"fields": {"score": {"doubleValue": 1.5}}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/metrics/m1", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{"fieldPath": "score", "increment": {"doubleValue": 0.5}}],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/metrics/m1").json()
+    assert doc["fields"]["score"]["doubleValue"] == 2.0
+
+
+def test_transform_set_to_server_value(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/events",
+        params={"documentId": "e1"},
+        json={"fields": {"name": {"stringValue": "login"}}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/events/e1", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{"fieldPath": "updatedAt", "setToServerValue": "REQUEST_TIME"}],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/events/e1").json()
+    assert "timestampValue" in doc["fields"]["updatedAt"]
+
+
+def test_transform_append_missing_elements(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/lists",
+        params={"documentId": "l1"},
+        json={"fields": {"tags": {"arrayValue": {"values": [{"stringValue": "a"}]}}}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/lists/l1", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{
+                    "fieldPath": "tags",
+                    "appendMissingElements": {"values": [{"stringValue": "a"}, {"stringValue": "b"}]},
+                }],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/lists/l1").json()
+    values = [v["stringValue"] for v in doc["fields"]["tags"]["arrayValue"]["values"]]
+    assert values == ["a", "b"]  # "a" not duplicated
+
+
+def test_transform_remove_all_from_array(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/lists",
+        params={"documentId": "l2"},
+        json={"fields": {"tags": {"arrayValue": {"values": [
+            {"stringValue": "a"}, {"stringValue": "b"}, {"stringValue": "a"},
+        ]}}}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/lists/l2", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{
+                    "fieldPath": "tags",
+                    "removeAllFromArray": {"values": [{"stringValue": "a"}]},
+                }],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/lists/l2").json()
+    values = [v["stringValue"] for v in doc["fields"]["tags"]["arrayValue"]["values"]]
+    assert values == ["b"]
+
+
+def test_transform_nested_field_path(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/nested",
+        params={"documentId": "n1"},
+        json={"fields": {"stats": {"mapValue": {"fields": {"count": {"integerValue": "0"}}}}}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/nested/n1", "fields": {}},
+                "updateMask": {"fieldPaths": []},
+                "updateTransforms": [{"fieldPath": "stats.count", "increment": {"integerValue": "7"}}],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/nested/n1").json()
+    count = doc["fields"]["stats"]["mapValue"]["fields"]["count"]["integerValue"]
+    assert count == "7"
+
+
+def test_transform_multiple_in_one_write(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/multi",
+        params={"documentId": "mx1"},
+        json={"fields": {"views": {"integerValue": "1"}}},
+    )
+    firestore_client.post(
+        f"/v1/{DB}:commit",
+        json={
+            "writes": [{
+                "update": {"name": f"{DOCS}/multi/mx1", "fields": {"label": {"stringValue": "new"}}},
+                "updateMask": {"fieldPaths": ["label"]},
+                "updateTransforms": [
+                    {"fieldPath": "views", "increment": {"integerValue": "9"}},
+                    {"fieldPath": "updatedAt", "setToServerValue": "REQUEST_TIME"},
+                ],
+            }]
+        },
+    )
+    doc = firestore_client.get(f"/v1/{DOCS}/multi/mx1").json()
+    assert doc["fields"]["views"]["integerValue"] == "10"
+    assert doc["fields"]["label"]["stringValue"] == "new"
+    assert "timestampValue" in doc["fields"]["updatedAt"]

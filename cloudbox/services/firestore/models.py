@@ -31,11 +31,20 @@ class DocumentMask(BaseModel):
     fieldPaths: list[str] = Field(default_factory=list)
 
 
+class FieldTransform(BaseModel):
+    fieldPath: str
+    setToServerValue: str | None = None
+    increment: dict | None = None            # FirestoreValue
+    appendMissingElements: dict | None = None  # {"values": [...]}
+    removeAllFromArray: dict | None = None     # {"values": [...]}
+
+
 class Write(BaseModel):
     update: Document | None = None
     delete: str | None = None
     currentDocument: dict | None = None
     updateMask: DocumentMask | None = None
+    updateTransforms: list[FieldTransform] = Field(default_factory=list)
 
 
 class CommitRequest(BaseModel):
