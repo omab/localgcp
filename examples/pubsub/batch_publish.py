@@ -21,7 +21,7 @@ def main():
     sub_path = f"projects/{PROJECT}/subscriptions/{SUBSCRIPTION}"
 
     ok(http.put(f"{PUBSUB_BASE}/v1/{topic_path}"))
-    ok(http.put(f"{PUBSUB_BASE}/v1/{sub_path}", json={"topic": topic_path}))
+    ok(http.put(f"{PUBSUB_BASE}/v1/{sub_path}", json={"name": sub_path, "topic": topic_path}))
 
     # Publish a batch with message attributes
     events = [

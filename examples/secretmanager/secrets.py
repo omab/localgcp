@@ -43,13 +43,13 @@ def main():
     print(f"Added version: {v2_name}")
 
     # Access latest version
-    r = ok(http.get(f"{SECRETMANAGER_BASE}/v1/{secret_name}/versions/latest:access"))
+    r = ok(http.post(f"{SECRETMANAGER_BASE}/v1/{secret_name}/versions/latest:access"))
     value = base64.b64decode(r.json()["payload"]["data"]).decode()
     print(f"Latest value: {value!r}")
     assert value == "super-secret-v2"
 
     # Access version 1 explicitly
-    r = ok(http.get(f"{SECRETMANAGER_BASE}/v1/{v1_name}:access"))
+    r = ok(http.post(f"{SECRETMANAGER_BASE}/v1/{v1_name}:access"))
     value = base64.b64decode(r.json()["payload"]["data"]).decode()
     print(f"Version 1 value: {value!r}")
     assert value == "super-secret-v1"
@@ -61,7 +61,7 @@ def main():
 
     # Disable version 1
     ok(http.post(f"{SECRETMANAGER_BASE}/v1/{v1_name}:disable"))
-    r = http.get(f"{SECRETMANAGER_BASE}/v1/{v1_name}:access")
+    r = http.post(f"{SECRETMANAGER_BASE}/v1/{v1_name}:access")
     print(f"Access disabled version: status={r.status_code}")  # 400/404
 
     # Cleanup

@@ -24,7 +24,7 @@ def main():
     print(f"Created topic: {topic_path}")
 
     # Create subscription
-    ok(http.put(f"{PUBSUB_BASE}/v1/{sub_path}", json={"topic": topic_path}))
+    ok(http.put(f"{PUBSUB_BASE}/v1/{sub_path}", json={"name": sub_path, "topic": topic_path}))
     print(f"Created subscription: {sub_path}")
 
     # Publish messages
