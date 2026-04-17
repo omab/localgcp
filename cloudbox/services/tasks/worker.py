@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -27,6 +27,31 @@ def _parse_dt(s: str) -> datetime:
     if "." in s:
         return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
     return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+
+
+def _parse_duration_s(s: str) -> float:
+    """Parse a Cloud Tasks duration string like '10s' or '0.5s' to seconds."""
+    s = s.strip()
+    if s.endswith("s"):
+        try:
+            return float(s[:-1])
+        except ValueError:
+            pass
+    return 0.1
+
+
+def _retry_delay(retry_config: dict, attempt: int) -> float:
+    """Return the delay in seconds before the next retry attempt.
+
+    Uses exponential backoff: min_backoff * 2^min(attempt-1, max_doublings),
+    capped at max_backoff.
+    """
+    min_b = _parse_duration_s(retry_config.get("minBackoff", "0.1s"))
+    max_b = _parse_duration_s(retry_config.get("maxBackoff", "3600s"))
+    doublings = int(retry_config.get("maxDoublings", 16))
+    exponent = min(attempt - 1, doublings)
+    delay = min_b * (2 ** exponent)
+    return min(delay, max_b)
 
 
 async def dispatch_loop() -> None:
@@ -108,15 +133,19 @@ async def _dispatch(client, store, task_key: str, task: dict, http_req: dict) ->
     except Exception as exc:
         logger.warning("Task %s dispatch error: %s", task_key, exc)
 
-    # Retry logic: check maxAttempts
-    queue = store.get("queues", task.get("name", "").rsplit("/tasks/", 1)[0])
-    max_attempts = 100
-    if queue:
-        max_attempts = queue.get("retryConfig", {}).get("maxAttempts", 100)
+    # Retry logic
+    queue_name = task_key.rsplit("/tasks/", 1)[0]
+    queue = store.get("queues", queue_name)
+    retry_config = (queue or {}).get("retryConfig", {})
+    max_attempts = int(retry_config.get("maxAttempts", 100))
 
     if task["dispatchCount"] >= max_attempts:
-        logger.warning("Task %s exceeded maxAttempts, dropping", task_key)
+        logger.warning("Task %s exceeded maxAttempts (%d), dropping", task_key, max_attempts)
         store.delete("tasks", task_key)
         return
 
+    delay = _retry_delay(retry_config, task["dispatchCount"])
+    next_time = datetime.now(timezone.utc) + timedelta(seconds=delay)
+    task["scheduleTime"] = next_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    logger.debug("Task %s retry %d in %.2fs", task_key, task["dispatchCount"], delay)
     store.set("tasks", task_key, task)

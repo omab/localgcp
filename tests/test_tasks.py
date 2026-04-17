@@ -1,4 +1,5 @@
 """Tests for Cloud Tasks emulator."""
+import pytest
 
 PROJECT = "local-project"
 LOCATION = "us-central1"
@@ -277,3 +278,44 @@ def test_delete_missing_task_returns_404(tasks_client):
 def test_list_tasks_missing_queue_returns_404(tasks_client):
     r = tasks_client.get(f"{BASE}/queues/no-such-queue/tasks")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Retry backoff
+# ---------------------------------------------------------------------------
+
+
+def test_retry_delay_calculation():
+    """_retry_delay returns correct exponential backoff values."""
+    from cloudbox.services.tasks.worker import _retry_delay
+
+    config = {"minBackoff": "1s", "maxBackoff": "300s", "maxDoublings": 3}
+
+    # attempt 1: 1 * 2^0 = 1s
+    assert _retry_delay(config, 1) == pytest.approx(1.0)
+    # attempt 2: 1 * 2^1 = 2s
+    assert _retry_delay(config, 2) == pytest.approx(2.0)
+    # attempt 3: 1 * 2^2 = 4s
+    assert _retry_delay(config, 3) == pytest.approx(4.0)
+    # attempt 4: maxDoublings=3, so exponent capped at 3 → 1 * 2^3 = 8s
+    assert _retry_delay(config, 4) == pytest.approx(8.0)
+    # attempt 5: still capped at doublings → 8s (not 16)
+    assert _retry_delay(config, 5) == pytest.approx(8.0)
+
+
+def test_retry_delay_respects_max_backoff():
+    from cloudbox.services.tasks.worker import _retry_delay
+
+    config = {"minBackoff": "10s", "maxBackoff": "30s", "maxDoublings": 16}
+    # 10 * 2^2 = 40s, capped to 30s
+    assert _retry_delay(config, 3) == pytest.approx(30.0)
+
+
+def test_retry_delay_defaults():
+    """Default retry config matches Cloud Tasks defaults."""
+    from cloudbox.services.tasks.worker import _retry_delay
+
+    config = {}
+    # defaults: minBackoff=0.1s, maxDoublings=16, maxBackoff=3600s
+    assert _retry_delay(config, 1) == pytest.approx(0.1)
+    assert _retry_delay(config, 2) == pytest.approx(0.2)

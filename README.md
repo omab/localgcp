@@ -475,7 +475,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | App Engine HTTP tasks | ❌ | |
 | OIDC / OAuth tokens in task dispatch | ❌ | |
 | Rate limiting enforcement (`maxDispatchesPerSecond`, `maxConcurrentDispatches`) | ❌ | Config stored, not enforced |
-| Retry backoff (`minBackoff`, `maxBackoff`, `maxDoublings`) | ❌ | Only `maxAttempts` is enforced |
+| Retry backoff (`minBackoff`, `maxBackoff`, `maxDoublings`) | ✅ | Exponential backoff: `minBackoff * 2^min(attempt-1, maxDoublings)`, capped at `maxBackoff`; next `scheduleTime` set accordingly |
 | Task deduplication (content-based) | ❌ | Duplicate rejected only on exact name collision |
 
 ### BigQuery
