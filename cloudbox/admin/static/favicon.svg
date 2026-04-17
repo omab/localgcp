@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Cloudbox</title>
+  <rect width="32" height="32" rx="5" fill="#0f1624"/>
+  <polyline points="6,9 15,16 6,23" fill="none" stroke="#3fb950" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="18" y="10" width="9" height="13" rx="1.5" fill="#4493f8"/>
+</svg>
