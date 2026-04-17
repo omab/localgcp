@@ -64,6 +64,25 @@ The feature matrix, test coverage, and architecture reflect real engineering tra
 docker compose up
 ```
 
+Or pull and run directly from Docker Hub:
+
+```bash
+docker run --rm -p 4443:4443 -p 8080:8080 -p 8085:8085 -p 8086:8086 \
+  -p 8090:8090 -p 8091:8091 -p 8123:8123 -p 8888:8888 \
+  -p 9010:9010 -p 9020:9020 -p 9050:9050 \
+  omab/cloudbox:latest
+```
+
+To persist data across restarts, mount a host directory:
+
+```bash
+docker run --rm -p 4443:4443 -p 8080:8080 -p 8085:8085 -p 8086:8086 \
+  -p 8090:8090 -p 8091:8091 -p 8123:8123 -p 8888:8888 \
+  -p 9010:9010 -p 9020:9020 -p 9050:9050 \
+  -v "$(pwd)/cloudbox-data:/data" -e CLOUDBOX_DATA_DIR=/data \
+  omab/cloudbox:latest
+```
+
 The container starts all services and exposes their ports automatically. The Admin UI is available at http://localhost:8888.
 
 ### Local (Python)
