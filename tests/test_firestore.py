@@ -1012,3 +1012,88 @@ def test_batch_write_empty(firestore_client):
     body = r.json()
     assert body["writeResults"] == []
     assert body["status"] == []
+
+
+# ---------------------------------------------------------------------------
+# Field projection (SELECT)
+# ---------------------------------------------------------------------------
+
+
+def test_select_single_field(firestore_client):
+    for i in range(3):
+        firestore_client.post(
+            f"/v1/{DOCS}/proj",
+            params={"documentId": f"p{i}"},
+            json={"fields": {
+                "name": {"stringValue": f"item{i}"},
+                "price": {"integerValue": str(i * 10)},
+                "hidden": {"stringValue": "secret"},
+            }},
+        )
+    r = firestore_client.post(f"/v1/{DOCS}:runQuery", json={
+        "structuredQuery": {
+            "from": [{"collectionId": "proj"}],
+            "select": {"fields": [{"fieldPath": "name"}]},
+            "orderBy": [{"field": {"fieldPath": "name"}, "direction": "ASCENDING"}],
+        }
+    })
+    docs = [row["document"] for row in r.json() if "document" in row]
+    assert len(docs) == 3
+    for doc in docs:
+        assert "name" in doc["fields"]
+        assert "price" not in doc["fields"]
+        assert "hidden" not in doc["fields"]
+
+
+def test_select_multiple_fields(firestore_client):
+    firestore_client.post(
+        f"/v1/{DOCS}/projm",
+        params={"documentId": "m1"},
+        json={"fields": {
+            "a": {"stringValue": "A"},
+            "b": {"integerValue": "2"},
+            "c": {"booleanValue": True},
+        }},
+    )
+    r = firestore_client.post(f"/v1/{DOCS}:runQuery", json={
+        "structuredQuery": {
+            "from": [{"collectionId": "projm"}],
+            "select": {"fields": [{"fieldPath": "a"}, {"fieldPath": "c"}]},
+        }
+    })
+    docs = [row["document"] for row in r.json() if "document" in row]
+    assert len(docs) == 1
+    fields = docs[0]["fields"]
+    assert "a" in fields
+    assert "c" in fields
+    assert "b" not in fields
+
+
+def test_select_preserves_filters_and_order(firestore_client):
+    """Projection does not break WHERE or ORDER BY."""
+    for i, (name, score) in enumerate([("alpha", 5), ("beta", 15), ("gamma", 8)]):
+        firestore_client.post(
+            f"/v1/{DOCS}/projf",
+            params={"documentId": f"f{i}"},
+            json={"fields": {
+                "name": {"stringValue": name},
+                "score": {"integerValue": str(score)},
+            }},
+        )
+    r = firestore_client.post(f"/v1/{DOCS}:runQuery", json={
+        "structuredQuery": {
+            "from": [{"collectionId": "projf"}],
+            "where": {"fieldFilter": {
+                "field": {"fieldPath": "score"},
+                "op": "GREATER_THAN",
+                "value": {"integerValue": "6"},
+            }},
+            "orderBy": [{"field": {"fieldPath": "score"}, "direction": "ASCENDING"}],
+            "select": {"fields": [{"fieldPath": "name"}]},
+        }
+    })
+    docs = [row["document"] for row in r.json() if "document" in row]
+    names = [d["fields"]["name"]["stringValue"] for d in docs]
+    assert names == ["gamma", "beta"]
+    for doc in docs:
+        assert "score" not in doc["fields"]

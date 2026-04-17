@@ -220,4 +220,36 @@ def run_query(docs: list[dict], query: dict) -> list[dict]:
     if limit is not None:
         results = results[:limit]
 
+    # SELECT (field projection) — applied last so filters/cursors see all fields
+    select = query.get("select")
+    if select:
+        field_paths = [f["fieldPath"] for f in select.get("fields", [])]
+        if field_paths and field_paths != ["__name__"]:
+            projected = []
+            for doc in results:
+                fields = doc.get("fields", {})
+                kept = {fp: _get_field_raw(fields, fp) for fp in field_paths if _get_field_raw(fields, fp) is not None}
+                projected.append({**doc, "fields": kept})
+            results = projected
+
     return results
+
+
+def _get_field_raw(doc_fields: dict, field_path: str) -> dict | None:
+    """Return the raw Firestore Value dict for a dotted field path, or None."""
+    parts = field_path.split(".")
+    current = doc_fields
+    for i, part in enumerate(parts):
+        if not isinstance(current, dict):
+            return None
+        fv = current.get(part)
+        if fv is None:
+            return None
+        if i == len(parts) - 1:
+            return fv
+        # traverse into mapValue
+        if isinstance(fv, dict) and "mapValue" in fv:
+            current = fv["mapValue"].get("fields", {})
+        else:
+            return None
+    return None
