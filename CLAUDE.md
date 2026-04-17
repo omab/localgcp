@@ -68,8 +68,10 @@ sdk_compat/
   clients.py                Pre-configured GCP SDK client factories
   test_with_sdk.py          Live smoke tests (requires a running instance)
 bin/
-  gcloudlocal.py            Thin shim → cloudbox.gcloudlocal:main
+  gcloudlocal.py            Thin shim → cloudbox.gcloudlocal:main (not used by root scripts)
   *.sh                      Shell helper scripts
+gcloud                      Root wrapper: uv run python cloudbox/gcloudlocal.py
+gsutil                      Root wrapper: uv run python cloudbox/gsutillocal.py
 ```
 
 ## Service pattern

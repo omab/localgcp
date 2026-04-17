@@ -206,10 +206,11 @@ uv run gcloudlocal [--project PROJECT] [--location LOCATION] [--format json] \
     SERVICE RESOURCE VERB [ARGS] [FLAGS]
 ```
 
-Or run it directly via the shim:
+Or use the root wrapper script:
 
 ```bash
-python bin/gcloudlocal.py ...
+./gcloud [--project PROJECT] [--location LOCATION] [--format json] \
+    SERVICE RESOURCE VERB [ARGS] [FLAGS]
 ```
 
 ### Examples
