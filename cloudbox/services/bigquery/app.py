@@ -114,12 +114,12 @@ async def create_table(project: str, dataset_id: str, request: Request):
 
 @app.patch("/bigquery/v2/projects/{project}/datasets/{dataset_id}/tables/{table_id}")
 @app.put("/bigquery/v2/projects/{project}/datasets/{dataset_id}/tables/{table_id}")
-async def update_view(project: str, dataset_id: str, table_id: str, request: Request):
+async def update_table(project: str, dataset_id: str, table_id: str, request: Request):
     body = await request.json()
-    if "view" not in body:
-        raise GCPError(400, "Only view updates are supported via PATCH/PUT on tables")
     try:
-        return _engine().update_view(project, dataset_id, table_id, body)
+        if "view" in body:
+            return _engine().update_view(project, dataset_id, table_id, body)
+        return _engine().update_table(project, dataset_id, table_id, body)
     except ValueError as e:
         msg = str(e)
         status = 404 if "Not found" in msg else 400

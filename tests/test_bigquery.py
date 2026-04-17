@@ -769,3 +769,82 @@ def test_delete_view(bq_client):
     r = bq_client.delete(f"{BASE}/datasets/{ds}/tables/vw")
     assert r.status_code == 204
     assert bq_client.get(f"{BASE}/datasets/{ds}/tables/vw").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Table schema evolution
+# ---------------------------------------------------------------------------
+
+
+def test_add_column(bq_client):
+    ds = "seds1"
+    bq_client.post(f"{BASE}/datasets", json={"datasetReference": {"projectId": PROJECT, "datasetId": ds}})
+    bq_client.post(f"{BASE}/datasets/{ds}/tables", json={
+        "tableReference": {"projectId": PROJECT, "datasetId": ds, "tableId": "t"},
+        "schema": {"fields": [{"name": "id", "type": "INTEGER"}]},
+    })
+    bq_client.post(f"{BASE}/datasets/{ds}/tables/t/insertAll", json={
+        "rows": [{"json": {"id": 1}}, {"json": {"id": 2}}],
+    })
+
+    # Add a new column via PATCH
+    r = bq_client.patch(f"{BASE}/datasets/{ds}/tables/t", json={
+        "schema": {"fields": [
+            {"name": "id", "type": "INTEGER"},
+            {"name": "label", "type": "STRING"},
+        ]},
+    })
+    assert r.status_code == 200
+    schema_fields = {f["name"] for f in r.json()["schema"]["fields"]}
+    assert "id" in schema_fields
+    assert "label" in schema_fields
+
+    # Insert a row using the new column and query it back
+    bq_client.post(f"{BASE}/datasets/{ds}/tables/t/insertAll", json={
+        "rows": [{"json": {"id": 3, "label": "hello"}}],
+    })
+    r = bq_client.post(f"{BASE}/queries", json={
+        "query": f"SELECT id, label FROM `{PROJECT}.{ds}.t` WHERE id = 3",
+        "useLegacySql": False,
+    })
+    assert r.status_code == 200
+    rows = r.json()["rows"]
+    assert len(rows) == 1
+    vals = {f["v"] for f in rows[0]["f"]}
+    assert "3" in vals
+    assert "hello" in vals
+
+
+def test_update_table_description_and_labels(bq_client):
+    ds = "seds2"
+    bq_client.post(f"{BASE}/datasets", json={"datasetReference": {"projectId": PROJECT, "datasetId": ds}})
+    bq_client.post(f"{BASE}/datasets/{ds}/tables", json={
+        "tableReference": {"projectId": PROJECT, "datasetId": ds, "tableId": "t"},
+        "schema": {"fields": [{"name": "x", "type": "INTEGER"}]},
+        "description": "original",
+        "labels": {"env": "dev"},
+    })
+
+    r = bq_client.patch(f"{BASE}/datasets/{ds}/tables/t", json={
+        "description": "updated",
+        "labels": {"env": "prod", "team": "data"},
+    })
+    assert r.status_code == 200
+    assert r.json()["description"] == "updated"
+    assert r.json()["labels"]["env"] == "prod"
+    assert r.json()["labels"]["team"] == "data"
+
+
+def test_add_existing_column_is_noop(bq_client):
+    """PATCHing with an already-existing field name does not raise."""
+    ds = "seds3"
+    bq_client.post(f"{BASE}/datasets", json={"datasetReference": {"projectId": PROJECT, "datasetId": ds}})
+    bq_client.post(f"{BASE}/datasets/{ds}/tables", json={
+        "tableReference": {"projectId": PROJECT, "datasetId": ds, "tableId": "t"},
+        "schema": {"fields": [{"name": "id", "type": "INTEGER"}, {"name": "name", "type": "STRING"}]},
+    })
+    r = bq_client.patch(f"{BASE}/datasets/{ds}/tables/t", json={
+        "schema": {"fields": [{"name": "id", "type": "INTEGER"}, {"name": "name", "type": "STRING"}]},
+    })
+    assert r.status_code == 200
+    assert len(r.json()["schema"]["fields"]) == 2

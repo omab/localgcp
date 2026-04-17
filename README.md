@@ -496,7 +496,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | `getQueryResults` | ✅ | |
 | Parameterized queries (`queryParameters`) | ✅ | Named (`@param`) and positional (`?`) modes; INT64, FLOAT64, BOOL, STRING, BYTES, ARRAY |
 | Partitioned / clustered tables | ❌ | Schema ignored; data stored flat in DuckDB |
-| Table update / schema evolution | ❌ | |
+| Table update / schema evolution | ✅ | `PATCH`/`PUT` adds new columns via `ALTER TABLE ADD COLUMN`; updates description and labels; existing columns are preserved |
 | Views | ✅ | `CREATE VIEW` backed by DuckDB; create, query, update (`PATCH`/`PUT`), delete; listed with `type: VIEW` |
 | Authorized views | ❌ | |
 | External tables | ❌ | |

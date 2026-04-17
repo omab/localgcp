@@ -347,6 +347,35 @@ class BigQueryEngine:
         self._tables[tbl_key] = meta
         return meta
 
+    def update_table(
+        self, project: str, dataset_id: str, table_id: str, body: dict
+    ) -> dict:
+        tbl_key = f"{project}.{dataset_id}.{table_id}"
+        meta = self._tables.get(tbl_key)
+        if meta is None:
+            raise ValueError(f"Not found: {table_id}")
+        if meta.get("type") == "VIEW":
+            raise ValueError(f"{table_id} is a view; use update_view instead")
+
+        new_fields = (body.get("schema") or {}).get("fields", [])
+        if new_fields:
+            existing_names = {f["name"] for f in meta["schema"]["fields"]}
+            for field in new_fields:
+                if field["name"] not in existing_names:
+                    duck_type = _BQ_TO_DUCK.get(field["type"].upper(), "VARCHAR")
+                    self._exec(
+                        f'ALTER TABLE "{dataset_id}"."{table_id}" '
+                        f'ADD COLUMN "{field["name"]}" {duck_type}'
+                    )
+                    meta["schema"]["fields"].append(field)
+
+        if "description" in body:
+            meta["description"] = body["description"]
+        if "labels" in body:
+            meta["labels"] = {**meta.get("labels", {}), **body["labels"]}
+        meta["lastModifiedTime"] = _now_ms()
+        return meta
+
     def get_table(self, project: str, dataset_id: str, table_id: str) -> dict | None:
         return self._tables.get(f"{project}.{dataset_id}.{table_id}")
 
