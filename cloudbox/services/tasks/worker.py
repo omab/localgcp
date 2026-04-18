@@ -2,7 +2,7 @@
 
 The worker loop runs as a FastAPI lifespan task. It scans all RUNNING
 queues every second, picks up tasks whose scheduleTime has passed, and
-dispatches them via HTTP.
+dispatches them via HTTP, respecting per-queue rate limits.
 """
 from __future__ import annotations
 
@@ -16,6 +16,19 @@ import httpx
 from cloudbox.services.tasks.store import get_store
 
 logger = logging.getLogger("cloudbox.tasks.worker")
+
+# Per-queue semaphores enforcing maxConcurrentDispatches.
+# Recreated whenever max_concurrent changes.
+_semaphores: dict[str, tuple[int, asyncio.Semaphore]] = {}  # queue_name → (limit, sem)
+
+
+def _get_semaphore(queue_name: str, max_concurrent: int) -> asyncio.Semaphore:
+    entry = _semaphores.get(queue_name)
+    if entry is None or entry[0] != max_concurrent:
+        sem = asyncio.Semaphore(max_concurrent)
+        _semaphores[queue_name] = (max_concurrent, sem)
+        return sem
+    return entry[1]
 
 
 def _now() -> str:
@@ -75,30 +88,59 @@ async def _tick(client: httpx.AsyncClient) -> None:
             continue
 
         queue_name = queue["name"]
+        rate_limits = queue.get("rateLimits", {})
+        max_dps = float(rate_limits.get("maxDispatchesPerSecond", 500.0))
+        max_concurrent = int(rate_limits.get("maxConcurrentDispatches", 1000))
+
         prefix = f"{queue_name}/tasks/"
         task_keys = [k for k in store.keys("tasks") if k.startswith(prefix)]
 
+        # Collect tasks that are ready to dispatch
+        ready: list[tuple[str, dict]] = []
         for task_key in task_keys:
             task = store.get("tasks", task_key)
             if task is None:
                 continue
-
-            # Check schedule time
             try:
                 sched = _parse_dt(task["scheduleTime"])
             except Exception:
                 sched = now
-
             if sched > now:
                 continue
 
             http_req = task.get("httpRequest")
             if not http_req:
-                # No HTTP target — just delete the task
                 store.delete("tasks", task_key)
                 continue
 
-            await _dispatch(client, store, task_key, task, http_req)
+            ready.append((task_key, task))
+
+        # Enforce maxDispatchesPerSecond — cap the batch started in this tick
+        if max_dps > 0 and len(ready) > max_dps:
+            ready = ready[: int(max_dps)]
+
+        if not ready:
+            continue
+
+        # Dispatch concurrently, bounded by maxConcurrentDispatches
+        sem = _get_semaphore(queue_name, max_concurrent)
+        await asyncio.gather(*(
+            _dispatch_with_sem(client, store, task_key, task, http_req, sem)
+            for task_key, task in ready
+            for http_req in [task["httpRequest"]]
+        ))
+
+
+async def _dispatch_with_sem(
+    client: httpx.AsyncClient,
+    store,
+    task_key: str,
+    task: dict,
+    http_req: dict,
+    sem: asyncio.Semaphore,
+) -> None:
+    async with sem:
+        await _dispatch(client, store, task_key, task, http_req)
 
 
 async def _dispatch(client, store, task_key: str, task: dict, http_req: dict) -> None:

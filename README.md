@@ -202,6 +202,7 @@ examples/
     secrets.py                 Create secret, add versions, access, disable
   tasks/
     tasks.py                   Create queue, enqueue tasks, list, delete
+    rate_limits.py             Create queue with rate limits, inspect and update via PATCH
   scheduler/
     jobs.py                    Create, pause, resume, delete cron jobs
   logging/
@@ -469,7 +470,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Feature | Status | Notes |
 |---------|:------:|-------|
 | Create / get / list / delete queue | ✅ | |
-| Update queue (`rateLimits`, `retryConfig`) | ✅ | Stored but rate limits not enforced |
+| Update queue (`rateLimits`, `retryConfig`) | ✅ | |
 | Pause / resume / purge queue | ✅ | |
 | Create task (HTTP target) | ✅ | `url`, `httpMethod`, `headers`, `body` (base64) |
 | List / get / delete task | ✅ | |
@@ -480,7 +481,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | `dispatchCount` / `firstAttempt` / `lastAttempt` tracking | ✅ | |
 | App Engine HTTP tasks | ❌ | |
 | OIDC / OAuth tokens in task dispatch | ❌ | |
-| Rate limiting enforcement (`maxDispatchesPerSecond`, `maxConcurrentDispatches`) | ❌ | Config stored, not enforced |
+| Rate limiting (`maxDispatchesPerSecond`, `maxConcurrentDispatches`) | ✅ | `maxDispatchesPerSecond` caps tasks started per tick; `maxConcurrentDispatches` enforced via per-queue asyncio.Semaphore; limits update live via PATCH |
 | Retry backoff (`minBackoff`, `maxBackoff`, `maxDoublings`) | ✅ | Exponential backoff: `minBackoff * 2^min(attempt-1, maxDoublings)`, capped at `maxBackoff`; next `scheduleTime` set accordingly |
 | Task deduplication (content-based) | ❌ | Duplicate rejected only on exact name collision |
 
