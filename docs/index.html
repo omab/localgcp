@@ -733,7 +733,7 @@
       </div>
       <div class="svc-card">
         <div class="svc-name">Cloud Logging</div>
-        <p>Log entries, severity &amp; timestamp filters, sinks, log-based metrics, Cloud Monitoring time series.</p>
+        <p>Log entries, severity &amp; timestamp filters, sinks, log-based metrics, log exclusions, Cloud Monitoring time series.</p>
         <span class="svc-port">:9020 · REST</span>
       </div>
       <div class="svc-card">
@@ -979,7 +979,8 @@ uv run python examples/bigquery/parameterized_query.py
 uv run python examples/bigquery/information_schema.py
 uv run python examples/secretmanager/secrets.py
 uv run python examples/tasks/tasks.py
-uv run python examples/scheduler/jobs.py</code></pre>
+uv run python examples/scheduler/jobs.py
+uv run python examples/logging/exclusions.py</code></pre>
     </div>
 
     <div class="services-grid">
@@ -1010,6 +1011,10 @@ uv run python examples/scheduler/jobs.py</code></pre>
       <div class="svc-card">
         <div class="svc-name">Cloud Scheduler</div>
         <p>cron jobs · pause · resume · delete</p>
+      </div>
+      <div class="svc-card">
+        <div class="svc-name">Cloud Logging</div>
+        <p>log exclusions · write filtering · CRUD</p>
       </div>
     </div>
   </div>

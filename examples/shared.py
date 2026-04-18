@@ -17,6 +17,7 @@ Override defaults via environment variables:
     CLOUDBOX_TASKS_PORT=8123
     CLOUDBOX_BIGQUERY_PORT=9050
     CLOUDBOX_SCHEDULER_PORT=8091
+    CLOUDBOX_LOGGING_PORT=9020
 """
 import os
 import httpx
@@ -32,6 +33,7 @@ SECRETMANAGER_BASE = f"http://{HOST}:{os.environ.get('CLOUDBOX_SECRETMANAGER_POR
 TASKS_BASE = f"http://{HOST}:{os.environ.get('CLOUDBOX_TASKS_PORT', '8123')}"
 BIGQUERY_BASE = f"http://{HOST}:{os.environ.get('CLOUDBOX_BIGQUERY_PORT', '9050')}"
 SCHEDULER_BASE = f"http://{HOST}:{os.environ.get('CLOUDBOX_SCHEDULER_PORT', '8091')}"
+LOGGING_BASE = f"http://{HOST}:{os.environ.get('CLOUDBOX_LOGGING_PORT', '9020')}"
 
 
 def client() -> httpx.Client:

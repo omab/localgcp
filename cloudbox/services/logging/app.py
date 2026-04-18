@@ -149,6 +149,19 @@ async def write_log_entries(request: Request):
     default_labels = body.get("labels", {})
     entries = body.get("entries", [])
 
+    # Build a per-project exclusion cache for this write batch
+    _exclusion_cache: dict[str, list[dict]] = {}
+
+    def _get_exclusions(project_id: str) -> list[dict]:
+        if project_id not in _exclusion_cache:
+            prefix = f"projects/{project_id}/exclusions/"
+            _exclusion_cache[project_id] = [
+                store.get("exclusions", k)
+                for k in store.keys("exclusions")
+                if k.startswith(prefix)
+            ]
+        return [e for e in _exclusion_cache[project_id] if e and not e.get("disabled", False)]
+
     for entry in entries:
         log_name = entry.get("logName") or default_log_name
         if not log_name:
@@ -176,6 +189,11 @@ async def write_log_entries(request: Request):
         }
 
         project = _project_from_resource(log_name)
+
+        # Drop entry if it matches any active exclusion
+        if any(_matches_filter(stored, excl.get("filter", "")) for excl in _get_exclusions(project)):
+            continue
+
         key = f"{project}/{log_name}/{insert_id}"
         store.set("entries", key, stored)
 
@@ -381,6 +399,77 @@ async def delete_metric(project: str, metric_id: str):
     found = store.delete("metrics", key)
     if not found:
         raise GCPError(404, f"Metric not found: {metric_id}")
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Exclusions
+# ---------------------------------------------------------------------------
+
+
+@app.post("/v2/projects/{project}/exclusions", status_code=200)
+async def create_exclusion(project: str, request: Request):
+    body = await request.json()
+    name = body.get("name", "")
+    if not name:
+        raise GCPError(400, "name is required")
+    store = _store()
+    key = f"projects/{project}/exclusions/{name}"
+    if store.exists("exclusions", key):
+        raise GCPError(409, f"Exclusion already exists: {name}")
+    now = _now()
+    exclusion = {
+        "name": name,
+        "description": body.get("description", ""),
+        "filter": body.get("filter", ""),
+        "disabled": bool(body.get("disabled", False)),
+        "createTime": now,
+        "updateTime": now,
+    }
+    store.set("exclusions", key, exclusion)
+    return exclusion
+
+
+@app.get("/v2/projects/{project}/exclusions/{exclusion_id}", status_code=200)
+async def get_exclusion(project: str, exclusion_id: str):
+    store = _store()
+    key = f"projects/{project}/exclusions/{exclusion_id}"
+    exc = store.get("exclusions", key)
+    if exc is None:
+        raise GCPError(404, f"Exclusion not found: {exclusion_id}")
+    return exc
+
+
+@app.get("/v2/projects/{project}/exclusions", status_code=200)
+async def list_exclusions(project: str):
+    store = _store()
+    prefix = f"projects/{project}/exclusions/"
+    exclusions = [store.get("exclusions", k) for k in store.keys("exclusions") if k.startswith(prefix)]
+    return {"exclusions": [e for e in exclusions if e]}
+
+
+@app.patch("/v2/projects/{project}/exclusions/{exclusion_id}", status_code=200)
+async def update_exclusion(project: str, exclusion_id: str, request: Request):
+    store = _store()
+    key = f"projects/{project}/exclusions/{exclusion_id}"
+    existing = store.get("exclusions", key)
+    if existing is None:
+        raise GCPError(404, f"Exclusion not found: {exclusion_id}")
+    body = await request.json()
+    for field in ("description", "filter", "disabled"):
+        if field in body:
+            existing[field] = body[field]
+    existing["updateTime"] = _now()
+    store.set("exclusions", key, existing)
+    return existing
+
+
+@app.delete("/v2/projects/{project}/exclusions/{exclusion_id}", status_code=200)
+async def delete_exclusion(project: str, exclusion_id: str):
+    store = _store()
+    key = f"projects/{project}/exclusions/{exclusion_id}"
+    if not store.delete("exclusions", key):
+        raise GCPError(404, f"Exclusion not found: {exclusion_id}")
     return {}
 
 

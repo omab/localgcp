@@ -204,6 +204,8 @@ examples/
     tasks.py                   Create queue, enqueue tasks, list, delete
   scheduler/
     jobs.py                    Create, pause, resume, delete cron jobs
+  logging/
+    exclusions.py              Create exclusions, verify filtering at write time
 ```
 
 Start Cloudbox, then run any example from the repo root:
@@ -568,7 +570,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Cloud Monitoring: write time series | ✅ | Stores points; no aggregation |
 | Cloud Monitoring: metric descriptors (stub) | ✅ | |
 | Complex filter expressions (`AND`, `OR`, `NOT`) | ❌ | Simple equality / comparison only |
-| Log exclusions | ❌ | |
+| Log exclusions | ✅ | Create/get/list/update/delete; active exclusions silently drop matching entries at write time; `disabled=true` bypasses filtering |
 | Log views | ❌ | |
 | Log buckets | ❌ | |
 | Monitored resource metadata | ❌ | Stored as-is; not validated |

@@ -611,3 +611,169 @@ def test_query_time_series(logging_client):
     data = r.json()
     assert "timeSeriesData" in data
     assert len(data["timeSeriesData"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Exclusions — CRUD
+# ---------------------------------------------------------------------------
+
+
+def test_create_and_get_exclusion(logging_client):
+    r = logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+        "name": "excl-1",
+        "filter": 'severity >= "ERROR"',
+        "description": "Drop errors",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "excl-1"
+    assert body["disabled"] is False
+
+    r2 = logging_client.get(f"/v2/projects/{PROJECT}/exclusions/excl-1")
+    assert r2.status_code == 200
+    assert r2.json()["filter"] == 'severity >= "ERROR"'
+
+
+def test_list_exclusions(logging_client):
+    for i in range(3):
+        logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+            "name": f"list-excl-{i}",
+            "filter": f'logName = "projects/{PROJECT}/logs/log-{i}"',
+        })
+    r = logging_client.get(f"/v2/projects/{PROJECT}/exclusions")
+    assert r.status_code == 200
+    names = {e["name"] for e in r.json()["exclusions"]}
+    assert "list-excl-0" in names and "list-excl-2" in names
+
+
+def test_duplicate_exclusion_returns_409(logging_client):
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"name": "dup-excl", "filter": ""})
+    r = logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"name": "dup-excl", "filter": ""})
+    assert r.status_code == 409
+
+
+def test_update_exclusion(logging_client):
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+        "name": "upd-excl",
+        "filter": 'severity = "DEBUG"',
+    })
+    r = logging_client.patch(f"/v2/projects/{PROJECT}/exclusions/upd-excl", json={
+        "filter": 'severity = "INFO"',
+        "disabled": True,
+    })
+    assert r.status_code == 200
+    assert r.json()["filter"] == 'severity = "INFO"'
+    assert r.json()["disabled"] is True
+
+
+def test_delete_exclusion(logging_client):
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"name": "del-excl", "filter": ""})
+    r = logging_client.delete(f"/v2/projects/{PROJECT}/exclusions/del-excl")
+    assert r.status_code == 200
+    r2 = logging_client.get(f"/v2/projects/{PROJECT}/exclusions/del-excl")
+    assert r2.status_code == 404
+
+
+def test_get_missing_exclusion_returns_404(logging_client):
+    r = logging_client.get(f"/v2/projects/{PROJECT}/exclusions/no-such")
+    assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Exclusions — filtering at write time
+# ---------------------------------------------------------------------------
+
+
+def _write_entry(logging_client, log_name: str, severity: str, insert_id: str):
+    logging_client.post("/v2/entries:write", json={
+        "entries": [{
+            "logName": log_name,
+            "severity": severity,
+            "insertId": insert_id,
+            "textPayload": f"msg-{insert_id}",
+            "resource": {"type": "global", "labels": {}},
+        }]
+    })
+
+
+def test_exclusion_filters_matching_entries(logging_client):
+    """Entries matching an active exclusion filter are not stored."""
+    log_name = f"projects/{PROJECT}/logs/noise"
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+        "name": "drop-debug",
+        "filter": 'severity = "DEBUG"',
+    })
+
+    _write_entry(logging_client, log_name, "DEBUG", "id-debug-1")
+    _write_entry(logging_client, log_name, "INFO", "id-info-1")
+
+    r = logging_client.post("/v2/entries:list", json={
+        "resourceNames": [f"projects/{PROJECT}"],
+        "filter": f'logName = "{log_name}"',
+    })
+    insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
+    assert "id-info-1" in insert_ids
+    assert "id-debug-1" not in insert_ids
+
+
+def test_disabled_exclusion_does_not_filter(logging_client):
+    """A disabled exclusion must not suppress entries."""
+    log_name = f"projects/{PROJECT}/logs/verbose"
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+        "name": "disabled-excl",
+        "filter": 'severity = "DEBUG"',
+        "disabled": True,
+    })
+
+    _write_entry(logging_client, log_name, "DEBUG", "id-debug-kept")
+
+    r = logging_client.post("/v2/entries:list", json={
+        "resourceNames": [f"projects/{PROJECT}"],
+        "filter": f'logName = "{log_name}"',
+    })
+    insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
+    assert "id-debug-kept" in insert_ids
+
+
+def test_exclusion_by_log_name(logging_client):
+    """Exclusions can target a specific log by logName."""
+    noisy_log = f"projects/{PROJECT}/logs/noisy-app"
+    keep_log = f"projects/{PROJECT}/logs/keep-app"
+
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+        "name": "drop-noisy",
+        "filter": f'logName = "{noisy_log}"',
+    })
+
+    _write_entry(logging_client, noisy_log, "INFO", "id-noisy")
+    _write_entry(logging_client, keep_log, "INFO", "id-keep")
+
+    r = logging_client.post("/v2/entries:list", json={
+        "resourceNames": [f"projects/{PROJECT}"],
+    })
+    insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
+    assert "id-keep" in insert_ids
+    assert "id-noisy" not in insert_ids
+
+
+def test_deleting_exclusion_resumes_writes(logging_client):
+    """After an exclusion is deleted, matching entries are stored normally."""
+    log_name = f"projects/{PROJECT}/logs/temp-excl-log"
+    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
+        "name": "temp-excl",
+        "filter": 'severity = "DEBUG"',
+    })
+
+    _write_entry(logging_client, log_name, "DEBUG", "id-before-delete")
+
+    logging_client.delete(f"/v2/projects/{PROJECT}/exclusions/temp-excl")
+
+    _write_entry(logging_client, log_name, "DEBUG", "id-after-delete")
+
+    r = logging_client.post("/v2/entries:list", json={
+        "resourceNames": [f"projects/{PROJECT}"],
+        "filter": f'logName = "{log_name}"',
+    })
+    insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
+    assert "id-before-delete" not in insert_ids
+    assert "id-after-delete" in insert_ids

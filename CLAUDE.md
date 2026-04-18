@@ -25,7 +25,7 @@ docker compose up
 uv run pytest tests/
 ```
 
-All 607 tests should pass. Tests use `pytest-asyncio` with `asyncio_mode = "auto"` (set in `pyproject.toml`). No external services required — each test file creates its own in-process test client.
+All 617 tests should pass. Tests use `pytest-asyncio` with `asyncio_mode = "auto"` (set in `pyproject.toml`). No external services required — each test file creates its own in-process test client.
 
 ## Project layout
 
