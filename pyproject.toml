@@ -1,6 +1,6 @@
 [project]
 name = "cloudbox"
-version = "0.2.2"
+version = "0.2.3"
 description = "Local emulator for GCP services"
 readme = "README.md"
 license = { file = "LICENSE" }
