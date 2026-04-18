@@ -42,6 +42,12 @@ class Lifecycle(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class RetentionPolicy(BaseModel):
+    retentionPeriod: str = "0"   # seconds, as a string
+    effectiveTime: str = Field(default_factory=_now_rfc3339)
+    isLocked: bool = False
+
+
 class BucketModel(BaseModel):
     kind: str = "storage#bucket"
     id: str = ""
@@ -58,6 +64,7 @@ class BucketModel(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     lifecycle: Lifecycle | None = None
     cors: list[dict] = Field(default_factory=list)
+    retentionPolicy: RetentionPolicy | None = None
 
     def model_post_init(self, __context: Any) -> None:
         if not self.id:
@@ -84,6 +91,7 @@ class ObjectModel(BaseModel):
     timeCreated: str = Field(default_factory=_now_rfc3339)
     updated: str = Field(default_factory=_now_rfc3339)
     metadata: dict[str, str] = Field(default_factory=dict)
+    retentionExpirationTime: str = ""
 
     def model_post_init(self, __context: Any) -> None:
         if not self.id:

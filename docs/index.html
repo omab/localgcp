@@ -698,7 +698,7 @@
     <div class="services-grid">
       <div class="svc-card">
         <div class="svc-name">Cloud Storage</div>
-        <p>Buckets, objects, simple / multipart / resumable uploads, byte-range downloads, compose, CORS config, notifications, lifecycle rules, gsutil-compatible CLI.</p>
+        <p>Buckets, objects, simple / multipart / resumable uploads, byte-range downloads, compose, CORS config, retention policies, notifications, lifecycle rules, gsutil-compatible CLI.</p>
         <span class="svc-port">:4443 · REST</span>
       </div>
       <div class="svc-card">
@@ -969,6 +969,7 @@ secret = client.create_secret(
 uv run python examples/gcs/upload_download.py
 uv run python examples/gcs/byte_range.py
 uv run python examples/gcs/cors.py
+uv run python examples/gcs/retention.py
 uv run python examples/pubsub/publish_subscribe.py
 uv run python examples/firestore/queries.py        # incl. field projection
 uv run python examples/firestore/batch_write.py
@@ -984,7 +985,7 @@ uv run python examples/scheduler/jobs.py</code></pre>
     <div class="services-grid">
       <div class="svc-card">
         <div class="svc-name">Cloud Storage</div>
-        <p>upload/download · compose · byte-range · CORS config</p>
+        <p>upload/download · compose · byte-range · CORS config · retention policies</p>
       </div>
       <div class="svc-card">
         <div class="svc-name">Pub/Sub</div>

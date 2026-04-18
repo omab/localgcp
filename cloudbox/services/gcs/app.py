@@ -175,7 +175,7 @@ async def patch_bucket(bucket: str, request: Request):
     if data is None:
         raise GCPError(404, "The specified bucket does not exist.")
     body = await request.json()
-    for field in ("lifecycle", "labels", "storageClass", "location", "cors"):
+    for field in ("lifecycle", "labels", "storageClass", "location", "cors", "retentionPolicy"):
         if field in body:
             data[field] = body[field]
     from cloudbox.services.gcs.models import _now_rfc3339
@@ -235,6 +235,59 @@ async def delete_bucket_cors(bucket: str):
         raise GCPError(404, "The specified bucket does not exist.")
     data["cors"] = []
     from cloudbox.services.gcs.models import _now_rfc3339
+    data["updated"] = _now_rfc3339()
+    data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
+    store.set("buckets", bucket, data)
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Bucket retention policy
+# ---------------------------------------------------------------------------
+
+
+@app.get("/storage/v1/b/{bucket}/retentionPolicy")
+async def get_bucket_retention(bucket: str):
+    store = _store()
+    data = store.get("buckets", bucket)
+    if data is None:
+        raise GCPError(404, "The specified bucket does not exist.")
+    policy = data.get("retentionPolicy") or {}
+    return {"retentionPolicy": policy, "kind": "storage#bucket", "id": bucket}
+
+
+@app.patch("/storage/v1/b/{bucket}/retentionPolicy")
+async def set_bucket_retention(bucket: str, request: Request):
+    from cloudbox.services.gcs.models import RetentionPolicy, _now_rfc3339
+    store = _store()
+    data = store.get("buckets", bucket)
+    if data is None:
+        raise GCPError(404, "The specified bucket does not exist.")
+    body = await request.json()
+    policy_in = body.get("retentionPolicy", body)
+    period_s = str(policy_in.get("retentionPeriod", "0"))
+    policy = RetentionPolicy(
+        retentionPeriod=period_s,
+        effectiveTime=_now_rfc3339(),
+        isLocked=bool(policy_in.get("isLocked", False)),
+    )
+    data["retentionPolicy"] = policy.model_dump()
+    data["updated"] = _now_rfc3339()
+    data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
+    store.set("buckets", bucket, data)
+    return {"retentionPolicy": data["retentionPolicy"], "kind": "storage#bucket", "id": bucket}
+
+
+@app.delete("/storage/v1/b/{bucket}/retentionPolicy", status_code=204)
+async def delete_bucket_retention(bucket: str):
+    from cloudbox.services.gcs.models import _now_rfc3339
+    store = _store()
+    data = store.get("buckets", bucket)
+    if data is None:
+        raise GCPError(404, "The specified bucket does not exist.")
+    if data.get("retentionPolicy", {}).get("isLocked"):
+        raise GCPError(403, "Retention policy is locked and cannot be removed.")
+    data["retentionPolicy"] = None
     data["updated"] = _now_rfc3339()
     data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
     store.set("buckets", bucket, data)
@@ -465,6 +518,23 @@ def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
     return obj_name, body_bytes, body_ct
 
 
+def _retention_expiry(bucket_data: dict, time_created: str) -> str:
+    """Compute retentionExpirationTime for an object given the bucket's policy."""
+    from datetime import datetime, timedelta, timezone
+    policy = bucket_data.get("retentionPolicy") if bucket_data else None
+    if not policy:
+        return ""
+    try:
+        period_s = int(policy.get("retentionPeriod", 0))
+    except (TypeError, ValueError):
+        return ""
+    if period_s <= 0:
+        return ""
+    created = datetime.fromisoformat(time_created.replace("Z", "+00:00"))
+    expiry = created + timedelta(seconds=period_s)
+    return expiry.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def _store_object(store, bucket: str, name: str, body: bytes, content_type: str) -> dict:
     from cloudbox.services.gcs.models import _now_rfc3339
 
@@ -475,6 +545,10 @@ def _store_object(store, bucket: str, name: str, body: bytes, content_type: str)
 
     existing = store.get("objects", key)
     generation = str(int(existing["generation"]) + 1) if existing else "1"
+    time_created = existing["timeCreated"] if existing else _now_rfc3339()
+
+    bucket_data = store.get("buckets", bucket)
+    retention_expiry = _retention_expiry(bucket_data, time_created)
 
     obj = ObjectModel(
         name=name,
@@ -485,8 +559,9 @@ def _store_object(store, bucket: str, name: str, body: bytes, content_type: str)
         md5Hash=md5,
         crc32c=crc32c_val,
         etag=md5,
-        timeCreated=existing["timeCreated"] if existing else _now_rfc3339(),
+        timeCreated=time_created,
         updated=_now_rfc3339(),
+        retentionExpirationTime=retention_expiry,
     )
     result = obj.model_dump()
     store.set("objects", key, result)
@@ -750,6 +825,12 @@ async def delete_object(
         if_generation_match=ifGenerationMatch or None,
         if_metageneration_match=ifMetagenerationMatch or None,
     )
+    expiry = obj_data.get("retentionExpirationTime", "")
+    if expiry:
+        from datetime import datetime, timezone
+        exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+        if datetime.now(timezone.utc) < exp_dt:
+            raise GCPError(403, f"Object '{object_name}' is subject to a retention policy and cannot be deleted until {expiry}.")
     store.delete("objects", key)
     store.delete("bodies", key)
     _fire_notifications(store, bucket, "OBJECT_DELETE", obj_data)

@@ -184,6 +184,7 @@ examples/
     compose.py                 Compose multiple objects into one
     byte_range.py              Partial downloads via Range header
     cors.py                    Set, inspect, and clear bucket CORS rules
+    retention.py               Set retention policy, upload object, verify enforcement
   pubsub/
     publish_subscribe.py       Create topic/subscription, publish, pull, ack
     batch_publish.py           Batch publish with message attributes
@@ -393,7 +394,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | IAM policies (`getIamPolicy` / `setIamPolicy`) | ❌ | |
 | Signed URLs | ❌ | |
 | CORS configuration | ✅ | Per-bucket `cors` list; GET/PUT `/b/{bucket}/cors`; also settable via `PATCH /b/{bucket}` |
-| Bucket retention policies / locks | ❌ | |
+| Bucket retention policies | ✅ | `retentionPeriod` (seconds) stored on bucket; objects get `retentionExpirationTime`; deletes blocked until expiry; policy removable unless `isLocked=true` |
 
 ### Pub/Sub
 

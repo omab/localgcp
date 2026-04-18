@@ -692,3 +692,92 @@ def test_cors_empty_by_default(gcs_client):
     r = gcs_client.get("/storage/v1/b/cors5/cors")
     assert r.status_code == 200
     assert r.json()["cors"] == []
+
+
+# ---------------------------------------------------------------------------
+# Retention policy
+# ---------------------------------------------------------------------------
+
+
+def test_retention_policy_set_and_get(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "ret1"})
+    r = gcs_client.patch("/storage/v1/b/ret1/retentionPolicy", json={
+        "retentionPolicy": {"retentionPeriod": "3600"},
+    })
+    assert r.status_code == 200
+    assert r.json()["retentionPolicy"]["retentionPeriod"] == "3600"
+
+    r2 = gcs_client.get("/storage/v1/b/ret1/retentionPolicy")
+    assert r2.status_code == 200
+    assert r2.json()["retentionPolicy"]["retentionPeriod"] == "3600"
+
+
+def test_retention_policy_in_bucket_metadata(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "ret2"})
+    gcs_client.patch("/storage/v1/b/ret2/retentionPolicy", json={
+        "retentionPolicy": {"retentionPeriod": "86400"},
+    })
+    r = gcs_client.get("/storage/v1/b/ret2")
+    assert r.status_code == 200
+    assert r.json()["retentionPolicy"]["retentionPeriod"] == "86400"
+
+
+def test_retention_policy_object_gets_expiry(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "ret3"})
+    gcs_client.patch("/storage/v1/b/ret3/retentionPolicy", json={
+        "retentionPolicy": {"retentionPeriod": "3600"},
+    })
+    r = gcs_client.post(
+        "/upload/storage/v1/b/ret3/o?name=file.txt&uploadType=media",
+        content=b"hello",
+        headers={"content-type": "text/plain"},
+    )
+    assert r.status_code == 200
+    meta = r.json()
+    assert meta.get("retentionExpirationTime") != ""
+
+
+def test_retention_policy_blocks_delete(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "ret4"})
+    gcs_client.patch("/storage/v1/b/ret4/retentionPolicy", json={
+        "retentionPolicy": {"retentionPeriod": "999999"},
+    })
+    gcs_client.post(
+        "/upload/storage/v1/b/ret4/o?name=file.txt&uploadType=media",
+        content=b"hello",
+        headers={"content-type": "text/plain"},
+    )
+    r = gcs_client.delete("/storage/v1/b/ret4/o/file.txt")
+    assert r.status_code == 403
+
+
+def test_retention_policy_allows_delete_after_expiry(gcs_client):
+    """Objects without a retention policy (period=0) can be deleted freely."""
+    gcs_client.post("/storage/v1/b", json={"name": "ret5"})
+    gcs_client.post(
+        "/upload/storage/v1/b/ret5/o?name=file.txt&uploadType=media",
+        content=b"hello",
+        headers={"content-type": "text/plain"},
+    )
+    r = gcs_client.delete("/storage/v1/b/ret5/o/file.txt")
+    assert r.status_code == 204
+
+
+def test_retention_policy_delete_removes_policy(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "ret6"})
+    gcs_client.patch("/storage/v1/b/ret6/retentionPolicy", json={
+        "retentionPolicy": {"retentionPeriod": "3600"},
+    })
+    r = gcs_client.delete("/storage/v1/b/ret6/retentionPolicy")
+    assert r.status_code == 204
+    r2 = gcs_client.get("/storage/v1/b/ret6/retentionPolicy")
+    assert r2.json()["retentionPolicy"] == {}
+
+
+def test_retention_policy_locked_cannot_be_removed(gcs_client):
+    gcs_client.post("/storage/v1/b", json={"name": "ret7"})
+    gcs_client.patch("/storage/v1/b/ret7/retentionPolicy", json={
+        "retentionPolicy": {"retentionPeriod": "3600", "isLocked": True},
+    })
+    r = gcs_client.delete("/storage/v1/b/ret7/retentionPolicy")
+    assert r.status_code == 403
