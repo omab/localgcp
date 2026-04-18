@@ -196,6 +196,7 @@ examples/
     tables.py                  Create dataset/table, insert rows, query, schema evolution
     views.py                   Create, query, update, and delete views
     parameterized_query.py     Named (@param) and positional (?) parameters
+    information_schema.py      Query INFORMATION_SCHEMA for tables, columns, schemata
   secretmanager/
     secrets.py                 Create secret, add versions, access, disable
   tasks/
@@ -503,7 +504,7 @@ Legend: ✅ Supported · 🟡 Partial · ❌ Not supported
 | Authorized views | ❌ | |
 | External tables | ❌ | |
 | Scripting / multi-statement queries | 🟡 | Single-statement only; DuckDB may handle simple cases |
-| `INFORMATION_SCHEMA` queries | 🟡 | DuckDB's own `information_schema` works; GCP-specific views not available |
+| `INFORMATION_SCHEMA` queries | ✅ | `TABLES`, `COLUMNS`, `SCHEMATA`, `VIEWS` rewritten to DuckDB's `information_schema`; project/dataset-qualified and unqualified forms both supported |
 | Geography / spatial functions | 🟡 | Only what DuckDB supports natively |
 | Array / struct / JSON functions | 🟡 | DuckDB syntax, not always identical to BigQuery |
 | IAM / row-level security | ❌ | |

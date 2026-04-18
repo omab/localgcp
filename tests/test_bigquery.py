@@ -848,3 +848,79 @@ def test_add_existing_column_is_noop(bq_client):
     })
     assert r.status_code == 200
     assert len(r.json()["schema"]["fields"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# INFORMATION_SCHEMA queries
+# ---------------------------------------------------------------------------
+
+
+def _setup_is_dataset(bq_client, ds: str, tables: list[str]) -> None:
+    bq_client.post(f"{BASE}/datasets", json={"datasetReference": {"projectId": PROJECT, "datasetId": ds}})
+    for t in tables:
+        bq_client.post(f"{BASE}/datasets/{ds}/tables", json={
+            "tableReference": {"projectId": PROJECT, "datasetId": ds, "tableId": t},
+            "schema": {"fields": [
+                {"name": "id", "type": "INTEGER"},
+                {"name": "name", "type": "STRING"},
+            ]},
+        })
+
+
+def test_information_schema_tables(bq_client):
+    """INFORMATION_SCHEMA.TABLES returns rows for tables in the dataset."""
+    _setup_is_dataset(bq_client, "isds1", ["orders", "customers"])
+
+    r = bq_client.post(f"{BASE}/queries", json={
+        "query": f"SELECT table_name FROM `{PROJECT}.isds1.INFORMATION_SCHEMA.TABLES`",
+        "useLegacySql": False,
+    })
+    assert r.status_code == 200
+    rows = r.json().get("rows", [])
+    names = {row["f"][0]["v"] for row in rows}
+    assert "orders" in names
+    assert "customers" in names
+
+
+def test_information_schema_tables_unquoted(bq_client):
+    """INFORMATION_SCHEMA.TABLES works without backtick quoting."""
+    _setup_is_dataset(bq_client, "isds2", ["events"])
+
+    r = bq_client.post(f"{BASE}/queries", json={
+        "query": "SELECT table_name, table_schema FROM isds2.INFORMATION_SCHEMA.TABLES",
+        "useLegacySql": False,
+    })
+    assert r.status_code == 200
+    names = {row["f"][0]["v"] for row in r.json().get("rows", [])}
+    assert "events" in names
+
+
+def test_information_schema_columns(bq_client):
+    """INFORMATION_SCHEMA.COLUMNS returns column metadata."""
+    _setup_is_dataset(bq_client, "isds3", ["products"])
+
+    r = bq_client.post(f"{BASE}/queries", json={
+        "query": (
+            "SELECT column_name, data_type FROM isds3.INFORMATION_SCHEMA.COLUMNS "
+            "WHERE table_name = 'products'"
+        ),
+        "useLegacySql": False,
+    })
+    assert r.status_code == 200
+    rows = r.json().get("rows", [])
+    col_names = {row["f"][0]["v"] for row in rows}
+    assert "id" in col_names
+    assert "name" in col_names
+
+
+def test_information_schema_schemata(bq_client):
+    """INFORMATION_SCHEMA.SCHEMATA lists known schemas."""
+    _setup_is_dataset(bq_client, "isds4", [])
+
+    r = bq_client.post(f"{BASE}/queries", json={
+        "query": "SELECT schema_name FROM INFORMATION_SCHEMA.SCHEMATA",
+        "useLegacySql": False,
+    })
+    assert r.status_code == 200
+    schema_names = {row["f"][0]["v"] for row in r.json().get("rows", [])}
+    assert "isds4" in schema_names

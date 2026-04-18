@@ -178,13 +178,63 @@ def _is_select(sql: str) -> bool:
     return any(stripped.startswith(kw) for kw in _SELECT_KEYWORDS)
 
 
+_INFORMATION_SCHEMA_VIEWS = {
+    "TABLES", "COLUMNS", "SCHEMATA", "VIEWS",
+    "TABLE_OPTIONS", "COLUMN_FIELD_PATHS", "PARTITIONS",
+}
+
+# Map BQ INFORMATION_SCHEMA view names to DuckDB information_schema equivalents.
+# Views not in this map are passed through unchanged (DuckDB may support them natively).
+_IS_VIEW_MAP: dict[str, str] = {
+    "TABLES": "tables",
+    "COLUMNS": "columns",
+    "SCHEMATA": "schemata",
+    "VIEWS": "views",
+    "TABLE_OPTIONS": "tables",   # best-effort fallback
+}
+
+
+def _rewrite_information_schema(sql: str) -> str:
+    """Rewrite BigQuery INFORMATION_SCHEMA references to DuckDB information_schema.
+
+    Handles:
+      `project.dataset.INFORMATION_SCHEMA.TABLES`
+      `dataset.INFORMATION_SCHEMA.TABLES`
+      project.dataset.INFORMATION_SCHEMA.TABLES  (unquoted)
+      INFORMATION_SCHEMA.TABLES
+    """
+    def _replacement(m: re.Match) -> str:
+        view = m.group("view").upper()
+        duck_view = _IS_VIEW_MAP.get(view, view.lower())
+        return f"information_schema.{duck_view}"
+
+    # Backtick forms: `anything.INFORMATION_SCHEMA.VIEW`
+    sql = re.sub(
+        r'`[^`]*\bINFORMATION_SCHEMA\b\.(?P<view>\w+)`',
+        _replacement,
+        sql,
+        flags=re.IGNORECASE,
+    )
+    # Unquoted dotted forms: word.INFORMATION_SCHEMA.VIEW or just INFORMATION_SCHEMA.VIEW
+    sql = re.sub(
+        r'\b(?:\w+\.)*INFORMATION_SCHEMA\.(?P<view>\w+)\b',
+        _replacement,
+        sql,
+        flags=re.IGNORECASE,
+    )
+    return sql
+
+
 def _rewrite_sql(sql: str, project: str) -> str:
     """Rewrite BigQuery SQL identifiers to DuckDB-compatible form.
 
     - `project.dataset.table`  →  "dataset"."table"
     - `dataset.table`          →  "dataset"."table"
     - `identifier`             →  "identifier"
+    - INFORMATION_SCHEMA.*     →  information_schema.*
     """
+    # Rewrite INFORMATION_SCHEMA references before identifier quoting
+    sql = _rewrite_information_schema(sql)
     # 3-part backtick: `project.dataset.table`
     sql = re.sub(
         r'`[^`]*\.([^`.\s]+)\.([^`.\s]+)`',

@@ -723,7 +723,7 @@
       </div>
       <div class="svc-card">
         <div class="svc-name">BigQuery</div>
-        <p>Datasets, tables, views, schema evolution, SELECT / DML, parameterized queries, streaming inserts, async jobs, CTAS — backed by DuckDB.</p>
+        <p>Datasets, tables, views, schema evolution, SELECT / DML, parameterized queries, INFORMATION_SCHEMA, streaming inserts, async jobs, CTAS — backed by DuckDB.</p>
         <span class="svc-port">:9050 · REST</span>
       </div>
       <div class="svc-card">
@@ -975,6 +975,7 @@ uv run python examples/firestore/batch_write.py
 uv run python examples/bigquery/tables.py          # incl. schema evolution
 uv run python examples/bigquery/views.py
 uv run python examples/bigquery/parameterized_query.py
+uv run python examples/bigquery/information_schema.py
 uv run python examples/secretmanager/secrets.py
 uv run python examples/tasks/tasks.py
 uv run python examples/scheduler/jobs.py</code></pre>
@@ -995,7 +996,7 @@ uv run python examples/scheduler/jobs.py</code></pre>
       </div>
       <div class="svc-card">
         <div class="svc-name">BigQuery</div>
-        <p>tables · schema evolution · views · parameterized queries</p>
+        <p>tables · schema evolution · views · parameterized queries · INFORMATION_SCHEMA</p>
       </div>
       <div class="svc-card">
         <div class="svc-name">Secret Manager</div>
