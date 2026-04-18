@@ -718,7 +718,7 @@
       </div>
       <div class="svc-card">
         <div class="svc-name">Cloud Tasks</div>
-        <p>Queues, HTTP tasks, deferred scheduling, exponential retry backoff, force-run, auto-dispatch background worker.</p>
+        <p>Queues, HTTP tasks, deferred scheduling, exponential retry backoff, rate limiting (maxDispatchesPerSecond / maxConcurrentDispatches), force-run, auto-dispatch background worker.</p>
         <span class="svc-port">:8123 · REST</span>
       </div>
       <div class="svc-card">
@@ -979,6 +979,7 @@ uv run python examples/bigquery/parameterized_query.py
 uv run python examples/bigquery/information_schema.py
 uv run python examples/secretmanager/secrets.py
 uv run python examples/tasks/tasks.py
+uv run python examples/tasks/rate_limits.py
 uv run python examples/scheduler/jobs.py
 uv run python examples/logging/exclusions.py</code></pre>
     </div>
@@ -1006,7 +1007,7 @@ uv run python examples/logging/exclusions.py</code></pre>
       </div>
       <div class="svc-card">
         <div class="svc-name">Cloud Tasks</div>
-        <p>queues · enqueue tasks · list · delete</p>
+        <p>queues · enqueue tasks · list · delete · rate limits</p>
       </div>
       <div class="svc-card">
         <div class="svc-name">Cloud Scheduler</div>

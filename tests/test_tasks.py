@@ -319,3 +319,129 @@ def test_retry_delay_defaults():
     # defaults: minBackoff=0.1s, maxDoublings=16, maxBackoff=3600s
     assert _retry_delay(config, 1) == pytest.approx(0.1)
     assert _retry_delay(config, 2) == pytest.approx(0.2)
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+def test_rate_limits_stored_and_returned(tasks_client):
+    """rateLimits set on create are stored and returned on GET."""
+    r = tasks_client.post(f"{BASE}/queues", json={
+        "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/rl-queue",
+        "rateLimits": {
+            "maxDispatchesPerSecond": 5.0,
+            "maxConcurrentDispatches": 2,
+        },
+    })
+    assert r.status_code == 200
+    rl = r.json()["rateLimits"]
+    assert rl["maxDispatchesPerSecond"] == pytest.approx(5.0)
+    assert rl["maxConcurrentDispatches"] == 2
+
+
+def test_rate_limits_updated_via_patch(tasks_client):
+    """PATCH can change rateLimits on an existing queue."""
+    tasks_client.post(f"{BASE}/queues", json={
+        "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/rl-patch-queue",
+    })
+    r = tasks_client.patch(f"{BASE}/queues/rl-patch-queue", json={
+        "rateLimits": {
+            "maxDispatchesPerSecond": 10.0,
+            "maxConcurrentDispatches": 3,
+        },
+    })
+    assert r.status_code == 200
+    rl = r.json()["rateLimits"]
+    assert rl["maxDispatchesPerSecond"] == pytest.approx(10.0)
+    assert rl["maxConcurrentDispatches"] == 3
+
+
+def test_max_dispatches_per_second_caps_tick():
+    """_tick dispatches at most maxDispatchesPerSecond tasks per second."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from cloudbox.services.tasks.worker import _tick
+    from cloudbox.services.tasks.store import get_store
+
+    store = get_store()
+    store.reset()
+
+    queue_name = "projects/p/locations/l/queues/rate-q"
+    store.set("queues", queue_name, {
+        "name": queue_name,
+        "state": "RUNNING",
+        "rateLimits": {"maxDispatchesPerSecond": 2.0, "maxConcurrentDispatches": 10},
+        "retryConfig": {"maxAttempts": 1},
+    })
+
+    past = (datetime.now(timezone.utc) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    for i in range(5):
+        task_key = f"{queue_name}/tasks/t{i}"
+        store.set("tasks", task_key, {
+            "name": task_key,
+            "scheduleTime": past,
+            "httpRequest": {"url": "http://localhost:9999/noop", "httpMethod": "POST"},
+        })
+
+    dispatch_calls = []
+
+    async def fake_dispatch(client, store, task_key, task, http_req, sem):
+        dispatch_calls.append(task_key)
+
+    with patch("cloudbox.services.tasks.worker._dispatch_with_sem", side_effect=fake_dispatch):
+        asyncio.run(_tick(MagicMock()))
+
+    # Only 2 of the 5 tasks should have been dispatched
+    assert len(dispatch_calls) == 2
+
+
+def test_max_concurrent_dispatches_limits_inflight():
+    """maxConcurrentDispatches=1 serialises dispatches via the semaphore."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import MagicMock, patch
+
+    from cloudbox.services.tasks.worker import _tick, _get_semaphore
+    from cloudbox.services.tasks.store import get_store
+
+    store = get_store()
+    store.reset()
+
+    queue_name = "projects/p/locations/l/queues/conc-q"
+    store.set("queues", queue_name, {
+        "name": queue_name,
+        "state": "RUNNING",
+        "rateLimits": {"maxDispatchesPerSecond": 100.0, "maxConcurrentDispatches": 1},
+        "retryConfig": {"maxAttempts": 1},
+    })
+
+    past = (datetime.now(timezone.utc) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    for i in range(3):
+        task_key = f"{queue_name}/tasks/c{i}"
+        store.set("tasks", task_key, {
+            "name": task_key,
+            "scheduleTime": past,
+            "httpRequest": {"url": "http://localhost:9999/noop", "httpMethod": "POST"},
+        })
+
+    # Force semaphore recreation with limit=1
+    _get_semaphore(queue_name, 1)
+
+    max_inflight = [0]
+    current_inflight = [0]
+
+    async def fake_dispatch(client, store, task_key, task, http_req, sem):
+        async with sem:
+            current_inflight[0] += 1
+            max_inflight[0] = max(max_inflight[0], current_inflight[0])
+            await asyncio.sleep(0)  # yield so other coroutines can try
+            current_inflight[0] -= 1
+
+    with patch("cloudbox.services.tasks.worker._dispatch_with_sem", side_effect=fake_dispatch):
+        asyncio.run(_tick(MagicMock()))
+
+    assert max_inflight[0] <= 1
