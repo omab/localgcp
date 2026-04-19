@@ -5,6 +5,7 @@ Stores:
   objects  → "{bucket}/{object}" → ObjectModel dict
   bodies   → "{bucket}/{object}" → bytes
 """
+
 from cloudbox.config import settings
 from cloudbox.core.store import NamespacedStore
 

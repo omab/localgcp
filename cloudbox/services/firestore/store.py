@@ -5,6 +5,7 @@ Documents are keyed by their full resource name, e.g.:
 
 The store namespace "documents" maps full doc path → Document dict.
 """
+
 from cloudbox.config import settings
 from cloudbox.core.store import NamespacedStore
 

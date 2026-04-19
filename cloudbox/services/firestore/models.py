@@ -1,23 +1,26 @@
 """Pydantic models matching the Firestore REST API wire format."""
+
 from __future__ import annotations
 
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class FirestoreValue(BaseModel):
     """A typed Firestore value. Only one field should be set."""
+
     nullValue: str | None = None
     booleanValue: bool | None = None
-    integerValue: str | None = None       # int64 as string
+    integerValue: str | None = None  # int64 as string
     doubleValue: float | None = None
-    timestampValue: str | None = None     # RFC3339
+    timestampValue: str | None = None  # RFC3339
     stringValue: str | None = None
-    bytesValue: str | None = None         # base64
+    bytesValue: str | None = None  # base64
     referenceValue: str | None = None
     geoPointValue: dict | None = None
-    arrayValue: dict | None = None        # {"values": [...]}
-    mapValue: dict | None = None          # {"fields": {...}}
+    arrayValue: dict | None = None  # {"values": [...]}
+    mapValue: dict | None = None  # {"fields": {...}}
 
 
 class Document(BaseModel):
@@ -34,9 +37,9 @@ class DocumentMask(BaseModel):
 class FieldTransform(BaseModel):
     fieldPath: str
     setToServerValue: str | None = None
-    increment: dict | None = None            # FirestoreValue
+    increment: dict | None = None  # FirestoreValue
     appendMissingElements: dict | None = None  # {"values": [...]}
-    removeAllFromArray: dict | None = None     # {"values": [...]}
+    removeAllFromArray: dict | None = None  # {"values": [...]}
 
 
 class Write(BaseModel):

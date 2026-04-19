@@ -1,14 +1,15 @@
 """Pydantic models matching GCS JSON API shapes."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 def _now_rfc3339() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +44,7 @@ class Lifecycle(BaseModel):
 
 
 class RetentionPolicy(BaseModel):
-    retentionPeriod: str = "0"   # seconds, as a string
+    retentionPeriod: str = "0"  # seconds, as a string
     effectiveTime: str = Field(default_factory=_now_rfc3339)
     isLocked: bool = False
 
@@ -161,7 +162,7 @@ class NotificationConfig(BaseModel):
         topic = self.topic
         # Strip "//pubsub.googleapis.com/" prefix if present
         if topic.startswith("//pubsub.googleapis.com/"):
-            topic = topic[len("//pubsub.googleapis.com/"):]
+            topic = topic[len("//pubsub.googleapis.com/") :]
         return topic
 
 

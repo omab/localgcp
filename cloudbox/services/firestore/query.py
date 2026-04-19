@@ -1,4 +1,5 @@
 """Firestore structured query evaluation."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -35,10 +36,19 @@ def _get_field(doc_fields: dict, field_path: str) -> Any:
         fv = current.get(part)
         if fv is None:
             return None
-        if isinstance(fv, dict) and any(k in fv for k in (
-            "stringValue", "integerValue", "booleanValue", "nullValue",
-            "doubleValue", "mapValue", "arrayValue", "timestampValue",
-        )):
+        if isinstance(fv, dict) and any(
+            k in fv
+            for k in (
+                "stringValue",
+                "integerValue",
+                "booleanValue",
+                "nullValue",
+                "doubleValue",
+                "mapValue",
+                "arrayValue",
+                "timestampValue",
+            )
+        ):
             current = _extract_value(fv)
         else:
             current = fv
@@ -100,9 +110,11 @@ def _eval_filter(doc: dict, filter_node: dict) -> bool:
             return doc_value is not None
         if op == "IS_NAN":
             import math
+
             return isinstance(doc_value, float) and math.isnan(doc_value)
         if op == "IS_NOT_NAN":
             import math
+
             return not (isinstance(doc_value, float) and math.isnan(doc_value))
 
     return True
@@ -171,13 +183,20 @@ def run_query(docs: list[dict], query: dict) -> list[dict]:
         for i in reversed(range(len(order_by))):
             field_path = order_by[i]["field"]["fieldPath"]
             desc = order_by[i].get("direction", "ASCENDING") == "DESCENDING"
-            if field_path == "__name__":
-                key_fn = lambda d, _d=desc: (d.get("name", "") is None, d.get("name", ""))
-            else:
-                key_fn = lambda d, fp=field_path: (
+
+            def _name_key(d: dict, _d: bool = desc) -> tuple:
+                return (d.get("name", "") is None, d.get("name", ""))
+
+            def _field_key(d: dict, fp: str = field_path) -> tuple:
+                return (
                     _get_field(d.get("fields", {}), fp) is None,
                     _get_field(d.get("fields", {}), fp),
                 )
+
+            if field_path == "__name__":
+                key_fn = _name_key
+            else:
+                key_fn = _field_key
             try:
                 results.sort(key=key_fn, reverse=desc)
             except TypeError:
@@ -192,7 +211,8 @@ def run_query(docs: list[dict], query: dict) -> list[dict]:
         # before=False → cursor is AFTER this position (exclusive start / startAfter)
         if cv:
             results = [
-                d for d in results
+                d
+                for d in results
                 if _compare_doc_to_cursor(d, order_by, cv) > 0
                 or (before and _compare_doc_to_cursor(d, order_by, cv) == 0)
             ]
@@ -205,7 +225,8 @@ def run_query(docs: list[dict], query: dict) -> list[dict]:
         # before=False → cursor is AT this position (inclusive end)
         if cv:
             results = [
-                d for d in results
+                d
+                for d in results
                 if _compare_doc_to_cursor(d, order_by, cv) < 0
                 or (not before and _compare_doc_to_cursor(d, order_by, cv) == 0)
             ]
@@ -228,7 +249,11 @@ def run_query(docs: list[dict], query: dict) -> list[dict]:
             projected = []
             for doc in results:
                 fields = doc.get("fields", {})
-                kept = {fp: _get_field_raw(fields, fp) for fp in field_paths if _get_field_raw(fields, fp) is not None}
+                kept = {
+                    fp: _get_field_raw(fields, fp)
+                    for fp in field_paths
+                    if _get_field_raw(fields, fp) is not None
+                }
                 projected.append({**doc, "fields": kept})
             results = projected
 

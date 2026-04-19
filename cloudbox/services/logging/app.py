@@ -18,13 +18,14 @@ Supported operations (Monitoring)
 TimeSeries: write, list (simplified)
 MetricDescriptors: list
 """
+
 from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 
 from cloudbox.core.errors import GCPError, add_gcp_exception_handler
 from cloudbox.core.middleware import add_request_logging
@@ -48,7 +49,7 @@ _SEVERITY_ORDER = {
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _project_from_resource(resource_name: str) -> str:
@@ -156,9 +157,7 @@ async def write_log_entries(request: Request):
         if project_id not in _exclusion_cache:
             prefix = f"projects/{project_id}/exclusions/"
             _exclusion_cache[project_id] = [
-                store.get("exclusions", k)
-                for k in store.keys("exclusions")
-                if k.startswith(prefix)
+                store.get("exclusions", k) for k in store.keys("exclusions") if k.startswith(prefix)
             ]
         return [e for e in _exclusion_cache[project_id] if e and not e.get("disabled", False)]
 
@@ -191,7 +190,9 @@ async def write_log_entries(request: Request):
         project = _project_from_resource(log_name)
 
         # Drop entry if it matches any active exclusion
-        if any(_matches_filter(stored, excl.get("filter", "")) for excl in _get_exclusions(project)):
+        if any(
+            _matches_filter(stored, excl.get("filter", "")) for excl in _get_exclusions(project)
+        ):
             continue
 
         key = f"{project}/{log_name}/{insert_id}"
@@ -218,8 +219,7 @@ async def list_log_entries(request: Request):
     # Filter by project
     if projects:
         all_entries = [
-            e for e in all_entries
-            if _project_from_resource(e.get("logName", "")) in projects
+            e for e in all_entries if _project_from_resource(e.get("logName", "")) in projects
         ]
 
     # Apply log filter
@@ -249,12 +249,13 @@ async def list_log_entries(request: Request):
 async def list_logs(project: str):
     store = _store()
     all_entries = store.list("entries")
-    log_names = sorted({
-        e.get("logName", "")
-        for e in all_entries
-        if _project_from_resource(e.get("logName", "")) == project
-        and e.get("logName")
-    })
+    log_names = sorted(
+        {
+            e.get("logName", "")
+            for e in all_entries
+            if _project_from_resource(e.get("logName", "")) == project and e.get("logName")
+        }
+    )
     return {"logNames": log_names}
 
 
@@ -262,8 +263,7 @@ async def list_logs(project: str):
 async def delete_log(project: str, log_id: str):
     store = _store()
     log_name = f"projects/{project}/logs/{log_id}"
-    to_delete = [k for k, v in zip(store.keys("entries"), store.list("entries")) if v.get("logName") == log_name]
-    # Re-collect keys since list() and keys() may not align by index
+    # Re-collect keys properly (list() and keys() ordering not guaranteed to align)
     all_keys = store.keys("entries")
     all_vals = {k: store.get("entries", k) for k in all_keys}
     for k, v in all_vals.items():
@@ -444,7 +444,9 @@ async def get_exclusion(project: str, exclusion_id: str):
 async def list_exclusions(project: str):
     store = _store()
     prefix = f"projects/{project}/exclusions/"
-    exclusions = [store.get("exclusions", k) for k in store.keys("exclusions") if k.startswith(prefix)]
+    exclusions = [
+        store.get("exclusions", k) for k in store.keys("exclusions") if k.startswith(prefix)
+    ]
     return {"exclusions": [e for e in exclusions if e]}
 
 
@@ -498,11 +500,6 @@ async def query_time_series(project: str, request: Request):
     """Simplified time series query — returns stored points."""
     store = _store()
     prefix = f"{project}/"
-    all_ts = [
-        v for k, v in zip(store.keys("timeseries"), store.list("timeseries"))
-        if k.startswith(prefix)
-    ]
-    # Re-collect properly
     all_keys = [k for k in store.keys("timeseries") if k.startswith(prefix)]
     all_ts = [store.get("timeseries", k) for k in all_keys]
     return {"timeSeriesData": [ts for ts in all_ts if ts]}

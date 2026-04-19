@@ -2,15 +2,31 @@
 
 Implements the GCS JSON API v1 endpoints used by google-cloud-storage.
 """
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import uuid
+from datetime import UTC
 from typing import Annotated
 
 from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
+
+from cloudbox.core.errors import GCPError, add_gcp_exception_handler
+from cloudbox.core.middleware import add_request_logging
+from cloudbox.services.gcs.models import (
+    BucketListResponse,
+    BucketModel,
+    Lifecycle,
+    LifecycleCondition,
+    NotificationConfig,
+    NotificationListResponse,
+    ObjectListResponse,
+    ObjectModel,
+)
+from cloudbox.services.gcs.store import get_store
 
 
 def _check_preconditions(
@@ -38,7 +54,7 @@ def _check_preconditions(
                 raise GCPError(412, "Precondition Failed: object already exists")
         else:
             if obj is None or generation != expected:
-                raise GCPError(412, f"Precondition Failed: generation mismatch")
+                raise GCPError(412, "Precondition Failed: generation mismatch")
 
     if if_metageneration_match is not None:
         if obj is None or metageneration != str(if_metageneration_match):
@@ -63,7 +79,7 @@ def _parse_range(range_header: str, total: int) -> tuple[int, int] | None:
     """
     if not range_header or not range_header.startswith("bytes="):
         return None
-    spec = range_header[len("bytes="):]
+    spec = range_header[len("bytes=") :]
     if spec.startswith("-"):
         try:
             suffix = int(spec[1:])
@@ -103,26 +119,13 @@ def _range_response(body: bytes, content_type: str, range_header: str | None) ->
                 headers={"Content-Range": f"bytes */{total}"},
             )
         start, end = parsed
-        chunk = body[start: end + 1]
+        chunk = body[start : end + 1]
         headers["Content-Range"] = f"bytes {start}-{end}/{total}"
         headers["Content-Length"] = str(len(chunk))
         return Response(content=chunk, status_code=206, media_type=content_type, headers=headers)
     headers["Content-Length"] = str(total)
     return Response(content=body, status_code=200, media_type=content_type, headers=headers)
 
-from cloudbox.core.errors import GCPError, add_gcp_exception_handler
-from cloudbox.core.middleware import add_request_logging
-from cloudbox.services.gcs.models import (
-    BucketListResponse,
-    BucketModel,
-    Lifecycle,
-    LifecycleCondition,
-    NotificationConfig,
-    NotificationListResponse,
-    ObjectListResponse,
-    ObjectModel,
-)
-from cloudbox.services.gcs.store import get_store
 
 app = FastAPI(title="Cloudbox — Cloud Storage", version="v1")
 add_gcp_exception_handler(app)
@@ -146,7 +149,7 @@ async def create_bucket(request: Request):
         raise GCPError(400, "name is required")
     store = _store()
     if store.exists("buckets", name):
-        raise GCPError(409, f"You already own this bucket. Please select another name.")
+        raise GCPError(409, "You already own this bucket. Please select another name.")
     bucket = BucketModel(name=name, **{k: v for k, v in body.items() if k != "name"})
     store.set("buckets", name, bucket.model_dump())
     return bucket.model_dump()
@@ -164,7 +167,7 @@ async def get_bucket(bucket: str):
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
-        raise GCPError(404, f"The specified bucket does not exist.")
+        raise GCPError(404, "The specified bucket does not exist.")
     return data
 
 
@@ -179,6 +182,7 @@ async def patch_bucket(bucket: str, request: Request):
         if field in body:
             data[field] = body[field]
     from cloudbox.services.gcs.models import _now_rfc3339
+
     data["updated"] = _now_rfc3339()
     data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
     store.set("buckets", bucket, data)
@@ -189,11 +193,11 @@ async def patch_bucket(bucket: str, request: Request):
 async def delete_bucket(bucket: str):
     store = _store()
     if not store.exists("buckets", bucket):
-        raise GCPError(404, f"The specified bucket does not exist.")
+        raise GCPError(404, "The specified bucket does not exist.")
     # Check if bucket is empty
     obj_keys = [k for k in store.keys("objects") if k.startswith(f"{bucket}/")]
     if obj_keys:
-        raise GCPError(409, f"The bucket you tried to delete is not empty.")
+        raise GCPError(409, "The bucket you tried to delete is not empty.")
     store.delete("buckets", bucket)
     return Response(status_code=204)
 
@@ -221,6 +225,7 @@ async def set_bucket_cors(bucket: str, request: Request):
     body = await request.json()
     data["cors"] = body.get("cors", [])
     from cloudbox.services.gcs.models import _now_rfc3339
+
     data["updated"] = _now_rfc3339()
     data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
     store.set("buckets", bucket, data)
@@ -235,6 +240,7 @@ async def delete_bucket_cors(bucket: str):
         raise GCPError(404, "The specified bucket does not exist.")
     data["cors"] = []
     from cloudbox.services.gcs.models import _now_rfc3339
+
     data["updated"] = _now_rfc3339()
     data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
     store.set("buckets", bucket, data)
@@ -259,6 +265,7 @@ async def get_bucket_retention(bucket: str):
 @app.patch("/storage/v1/b/{bucket}/retentionPolicy")
 async def set_bucket_retention(bucket: str, request: Request):
     from cloudbox.services.gcs.models import RetentionPolicy, _now_rfc3339
+
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -281,6 +288,7 @@ async def set_bucket_retention(bucket: str, request: Request):
 @app.delete("/storage/v1/b/{bucket}/retentionPolicy", status_code=204)
 async def delete_bucket_retention(bucket: str):
     from cloudbox.services.gcs.models import _now_rfc3339
+
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -312,13 +320,16 @@ async def upload_object(
 ):
     store = _store()
     if not store.exists("buckets", bucket):
-        raise GCPError(404, f"The specified bucket does not exist.")
+        raise GCPError(404, "The specified bucket does not exist.")
 
     ct = content_type or "application/octet-stream"
 
     if uploadType == "resumable":
         return await _initiate_resumable(
-            request, store, bucket, name,
+            request,
+            store,
+            bucket,
+            name,
             x_upload_content_type or ct,
             int(x_upload_content_length) if x_upload_content_length else None,
             if_generation_match=ifGenerationMatch or None,
@@ -407,11 +418,11 @@ async def upload_resumable_chunk(
         if content_range.startswith("bytes */"):
             is_status_query = True
             try:
-                total_size = int(content_range[len("bytes */"):])
+                total_size = int(content_range[len("bytes */") :])
             except ValueError:
                 pass
         elif content_range.startswith("bytes "):
-            rest = content_range[len("bytes "):]
+            rest = content_range[len("bytes ") :]
             range_part, total_part = rest.split("/", 1)
             if total_part != "*":
                 try:
@@ -444,9 +455,7 @@ async def upload_resumable_chunk(
                 store.get("objects", f"{bucket}/{session['name']}"),
                 if_generation_match=gen_match,
             )
-        obj = _store_object(
-            store, bucket, session["name"], accumulated, session["content_type"]
-        )
+        obj = _store_object(store, bucket, session["name"], accumulated, session["content_type"])
         store.delete("resumable_sessions", upload_id)
         store.delete("resumable_bodies", upload_id)
         return obj
@@ -460,15 +469,12 @@ async def upload_resumable_chunk(
 
 def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
     """Very minimal multipart/related parser for GCS multipart uploads."""
-    import email
-    import email.policy
-
     # Extract boundary from content-type header
     boundary = None
     for part in content_type.split(";"):
         p = part.strip()
         if p.startswith("boundary="):
-            boundary = p[len("boundary="):].strip('"')
+            boundary = p[len("boundary=") :].strip('"')
             break
 
     if not boundary:
@@ -506,6 +512,7 @@ def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
         if i == 0:
             # Metadata part — parse JSON for name
             import json
+
             try:
                 meta = json.loads(body)
                 obj_name = meta.get("name", "")
@@ -520,7 +527,8 @@ def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
 
 def _retention_expiry(bucket_data: dict, time_created: str) -> str:
     """Compute retentionExpirationTime for an object given the bucket's policy."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     policy = bucket_data.get("retentionPolicy") if bucket_data else None
     if not policy:
         return ""
@@ -572,6 +580,7 @@ def _store_object(store, bucket: str, name: str, body: bytes, content_type: str)
 
 def _crc32c_b64(data: bytes) -> str:
     import struct
+
     crc = 0
     for byte in data:
         crc ^= byte << 24
@@ -591,9 +600,9 @@ def _crc32c_b64(data: bytes) -> str:
 
 def _lifecycle_condition_matches(obj: dict, condition: LifecycleCondition) -> bool:
     """Return True if the object satisfies all conditions in the lifecycle rule."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if condition.age is not None:
         time_created_str = obj.get("timeCreated", "")
@@ -677,13 +686,13 @@ async def list_objects(
 ):
     store = _store()
     if not store.exists("buckets", bucket):
-        raise GCPError(404, f"The specified bucket does not exist.")
+        raise GCPError(404, "The specified bucket does not exist.")
 
     _apply_lifecycle(store, bucket)
 
     all_keys = store.keys("objects")
     bucket_prefix = f"{bucket}/"
-    names = [k[len(bucket_prefix):] for k in all_keys if k.startswith(bucket_prefix)]
+    names = [k[len(bucket_prefix) :] for k in all_keys if k.startswith(bucket_prefix)]
 
     if prefix:
         names = [n for n in names if n.startswith(prefix)]
@@ -692,7 +701,7 @@ async def list_objects(
     if delimiter:
         filtered = []
         for n in names:
-            after_prefix = n[len(prefix):]
+            after_prefix = n[len(prefix) :]
             idx = after_prefix.find(delimiter)
             if idx >= 0:
                 prefixes.add(prefix + after_prefix[: idx + len(delimiter)])
@@ -704,7 +713,7 @@ async def list_objects(
 
     # Simple page token: offset as int string
     offset = int(pageToken) if pageToken else 0
-    page = names[offset: offset + maxResults]
+    page = names[offset : offset + maxResults]
     next_token = str(offset + maxResults) if offset + maxResults < len(names) else None
 
     items = []
@@ -793,10 +802,17 @@ async def update_object_metadata(
     )
     body = await request.json()
     # Merge allowed mutable fields
-    for field in ("contentType", "metadata", "contentDisposition", "cacheControl", "contentEncoding"):
+    for field in (
+        "contentType",
+        "metadata",
+        "contentDisposition",
+        "cacheControl",
+        "contentEncoding",
+    ):
         if field in body:
             data[field] = body[field]
     from cloudbox.services.gcs.models import _now_rfc3339
+
     data["updated"] = _now_rfc3339()
     data["metageneration"] = str(int(data.get("metageneration", "1")) + 1)
     store.set("objects", key, data)
@@ -827,10 +843,15 @@ async def delete_object(
     )
     expiry = obj_data.get("retentionExpirationTime", "")
     if expiry:
-        from datetime import datetime, timezone
+        from datetime import datetime
+
         exp_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
-        if datetime.now(timezone.utc) < exp_dt:
-            raise GCPError(403, f"Object '{object_name}' is subject to a retention policy and cannot be deleted until {expiry}.")
+        if datetime.now(UTC) < exp_dt:
+            raise GCPError(
+                403,
+                f"Object '{object_name}' is subject to a retention policy"
+                f" and cannot be deleted until {expiry}.",
+            )
     store.delete("objects", key)
     store.delete("bodies", key)
     _fire_notifications(store, bucket, "OBJECT_DELETE", obj_data)
@@ -842,7 +863,9 @@ async def delete_object(
 # ---------------------------------------------------------------------------
 
 
-@app.post("/storage/v1/b/{src_bucket}/o/{src_object:path}/copyTo/b/{dst_bucket}/o/{dst_object:path}")
+@app.post(
+    "/storage/v1/b/{src_bucket}/o/{src_object:path}/copyTo/b/{dst_bucket}/o/{dst_object:path}"
+)
 async def copy_object(src_bucket: str, src_object: str, dst_bucket: str, dst_object: str):
     store = _store()
     src_key = f"{src_bucket}/{src_object}"
@@ -850,9 +873,11 @@ async def copy_object(src_bucket: str, src_object: str, dst_bucket: str, dst_obj
     if data is None:
         raise GCPError(404, f"No such object: {src_bucket}/{src_object}")
     if not store.exists("buckets", dst_bucket):
-        raise GCPError(404, f"The specified bucket does not exist.")
+        raise GCPError(404, "The specified bucket does not exist.")
     body = store.get("bodies", src_key) or b""
-    return _store_object(store, dst_bucket, dst_object, body, data.get("contentType", "application/octet-stream"))
+    return _store_object(
+        store, dst_bucket, dst_object, body, data.get("contentType", "application/octet-stream")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -907,8 +932,7 @@ async def compose_object(bucket: str, object_name: str, request: Request):
 
 
 @app.post(
-    "/storage/v1/b/{src_bucket}/o/{src_object:path}"
-    "/rewriteTo/b/{dst_bucket}/o/{dst_object:path}"
+    "/storage/v1/b/{src_bucket}/o/{src_object:path}/rewriteTo/b/{dst_bucket}/o/{dst_object:path}"
 )
 async def rewrite_object(
     src_bucket: str,
@@ -938,7 +962,9 @@ async def rewrite_object(
         pass
 
     body_bytes = store.get("bodies", src_key) or b""
-    content_type = body.get("contentType") or src_data.get("contentType", "application/octet-stream")
+    content_type = body.get("contentType") or src_data.get(
+        "contentType", "application/octet-stream"
+    )
     storage_class = body.get("storageClass") or src_data.get("storageClass", "STANDARD")
 
     dst = _store_object(store, dst_bucket, dst_object, body_bytes, content_type)
@@ -963,9 +989,9 @@ async def rewrite_object(
 def _next_notification_id(store, bucket: str) -> str:
     prefix = f"{bucket}/"
     existing_ids = [
-        int(k[len(prefix):])
+        int(k[len(prefix) :])
         for k in store.keys("notifications")
-        if k.startswith(prefix) and k[len(prefix):].isdigit()
+        if k.startswith(prefix) and k[len(prefix) :].isdigit()
     ]
     return str(max(existing_ids, default=0) + 1)
 
@@ -994,7 +1020,11 @@ async def list_notifications(bucket: str):
     prefix = f"{bucket}/"
     items = [
         NotificationConfig(**v)
-        for k, v in [(k, store.get("notifications", k)) for k in store.keys("notifications") if k.startswith(prefix)]
+        for k, v in [
+            (k, store.get("notifications", k))
+            for k in store.keys("notifications")
+            if k.startswith(prefix)
+        ]
         if v is not None
     ]
     return NotificationListResponse(items=items).model_dump()
@@ -1032,7 +1062,7 @@ def _fire_notifications(store, bucket: str, event_type: str, obj_data: dict) -> 
     import base64
     import json
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from cloudbox.services.pubsub import store as ps_store
 
@@ -1050,7 +1080,7 @@ def _fire_notifications(store, bucket: str, event_type: str, obj_data: dict) -> 
 
     object_name = obj_data.get("name", "")
     generation = obj_data.get("generation", "1")
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     for config in configs:
         if not config.matches(event_type, object_name):

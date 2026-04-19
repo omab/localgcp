@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-gcloudlocal — gcloud-compatible CLI targeting the Cloudbox emulator.
+"""gcloudlocal — gcloud-compatible CLI targeting the Cloudbox emulator.
 
 Mirrors gcloud's command structure:
 
@@ -121,6 +120,7 @@ def _table(rows: list[dict], columns: list[str]) -> None:
 # HTTP helpers
 # ---------------------------------------------------------------------------
 
+
 def _client(service: str) -> httpx.Client:
     return httpx.Client(base_url=_BASES[service], timeout=15.0)
 
@@ -154,18 +154,33 @@ def _gs_parse(uri: str) -> tuple[str, str]:
 # storage
 # ---------------------------------------------------------------------------
 
+
 def _storage_buckets_list(project: str, **_) -> None:
     with _client("gcs") as c:
         data = _check(c.get("/storage/v1/b", params={"project": project}))
     items = data.get("items", [])
-    _table([{"name": b["name"], "location": b.get("location", ""), "created": b.get("timeCreated", "")} for b in items],
-           ["name", "location", "created"])
+    _table(
+        [
+            {
+                "name": b["name"],
+                "location": b.get("location", ""),
+                "created": b.get("timeCreated", ""),
+            }
+            for b in items
+        ],
+        ["name", "location", "created"],
+    )
 
 
 def _storage_buckets_create(project: str, bucket: str, region: str, **_) -> None:
     with _client("gcs") as c:
-        data = _check(c.post("/storage/v1/b", params={"project": project},
-                             json={"name": bucket, "location": region}))
+        data = _check(
+            c.post(
+                "/storage/v1/b",
+                params={"project": project},
+                json={"name": bucket, "location": region},
+            )
+        )
     print(f"Created bucket gs://{data.get('name', bucket)}.")
 
 
@@ -189,8 +204,13 @@ def _storage_objects_list(uri: str, **_) -> None:
     with _client("gcs") as c:
         data = _check(c.get(f"/storage/v1/b/{bucket}/o", params=params))
     items = data.get("items", [])
-    _table([{"name": o["name"], "size": o.get("size", ""), "updated": o.get("updated", "")} for o in items],
-           ["name", "size", "updated"])
+    _table(
+        [
+            {"name": o["name"], "size": o.get("size", ""), "updated": o.get("updated", "")}
+            for o in items
+        ],
+        ["name", "size", "updated"],
+    )
 
 
 def _storage_objects_describe(uri: str, **_) -> None:
@@ -213,16 +233,21 @@ def _storage_notifications_list(bucket: str, **_) -> None:
         data = _check(c.get(f"/storage/v1/b/{bucket_name}/notificationConfigs"))
     items = data.get("items", [])
     _table(
-        [{"id": n.get("id", ""), "topic": n.get("topic", ""),
-          "event_types": ",".join(n.get("event_types") or ["ALL"]),
-          "payload_format": n.get("payload_format", "")} for n in items],
+        [
+            {
+                "id": n.get("id", ""),
+                "topic": n.get("topic", ""),
+                "event_types": ",".join(n.get("event_types") or ["ALL"]),
+                "payload_format": n.get("payload_format", ""),
+            }
+            for n in items
+        ],
         ["id", "topic", "event_types", "payload_format"],
     )
 
 
 def _storage_notifications_create(
-    project: str, bucket: str, topic: str,
-    event_types: list[str], payload_format: str, **_
+    project: str, bucket: str, topic: str, event_types: list[str], payload_format: str, **_
 ) -> None:
     bucket_name, _ = _gs_parse(bucket)
     topic_path = topic if "/" in topic else f"projects/{project}/topics/{topic}"
@@ -265,12 +290,14 @@ def _storage_cp(src: str, dst: str, **_) -> None:
         if not blob:
             blob = src_path.name
         with _client("gcs") as c:
-            _check(c.post(
-                f"/upload/storage/v1/b/{bucket}/o",
-                params={"name": blob, "uploadType": "media"},
-                content=src_path.read_bytes(),
-                headers={"Content-Type": "application/octet-stream"},
-            ))
+            _check(
+                c.post(
+                    f"/upload/storage/v1/b/{bucket}/o",
+                    params={"name": blob, "uploadType": "media"},
+                    content=src_path.read_bytes(),
+                    headers={"Content-Type": "application/octet-stream"},
+                )
+            )
         print(f"Uploaded {src_path} → gs://{bucket}/{blob}")
 
     elif not src_is_gcs and not dst_is_gcs:
@@ -282,13 +309,16 @@ def _storage_cp(src: str, dst: str, **_) -> None:
         if not dst_obj:
             dst_obj = src_obj
         with _client("gcs") as c:
-            _check(c.post(f"/storage/v1/b/{src_bucket}/o/{src_obj}/copyTo/b/{dst_bucket}/o/{dst_obj}"))
+            _check(
+                c.post(f"/storage/v1/b/{src_bucket}/o/{src_obj}/copyTo/b/{dst_bucket}/o/{dst_obj}")
+            )
         print(f"Copied {src} → {dst}")
 
 
 # ---------------------------------------------------------------------------
 # pubsub topics
 # ---------------------------------------------------------------------------
+
 
 def _pubsub_topics_list(project: str, **_) -> None:
     with _client("pubsub") as c:
@@ -315,7 +345,9 @@ def _pubsub_topics_delete(project: str, topic: str, **_) -> None:
     print(f"Deleted topic projects/{project}/topics/{topic}.")
 
 
-def _pubsub_topics_publish(project: str, topic: str, message: str, attributes: list[str], **_) -> None:
+def _pubsub_topics_publish(
+    project: str, topic: str, message: str, attributes: list[str], **_
+) -> None:
     encoded = base64.b64encode(message.encode()).decode()
     msg: dict[str, Any] = {"data": encoded}
     if attributes:
@@ -325,8 +357,9 @@ def _pubsub_topics_publish(project: str, topic: str, message: str, attributes: l
             attrs[k.strip()] = v.strip()
         msg["attributes"] = attrs
     with _client("pubsub") as c:
-        data = _check(c.post(f"/v1/projects/{project}/topics/{topic}:publish",
-                             json={"messages": [msg]}))
+        data = _check(
+            c.post(f"/v1/projects/{project}/topics/{topic}:publish", json={"messages": [msg]})
+        )
     ids = data.get("messageIds", [])
     print(f"Published message ID: {ids[0] if ids else '?'}")
 
@@ -335,20 +368,24 @@ def _pubsub_topics_publish(project: str, topic: str, message: str, attributes: l
 # pubsub subscriptions
 # ---------------------------------------------------------------------------
 
+
 def _pubsub_subs_list(project: str, **_) -> None:
     with _client("pubsub") as c:
         data = _check(c.get(f"/v1/projects/{project}/subscriptions"))
     subs = data.get("subscriptions", [])
-    _table([{"name": s["name"], "topic": s.get("topic", "")} for s in subs],
-           ["name", "topic"])
+    _table([{"name": s["name"], "topic": s.get("topic", "")} for s in subs], ["name", "topic"])
 
 
 def _pubsub_subs_create(project: str, subscription: str, topic: str, **_) -> None:
     topic_path = topic if "/" in topic else f"projects/{project}/topics/{topic}"
     sub_path = f"projects/{project}/subscriptions/{subscription}"
     with _client("pubsub") as c:
-        data = _check(c.put(f"/v1/projects/{project}/subscriptions/{subscription}",
-                             json={"name": sub_path, "topic": topic_path}))
+        data = _check(
+            c.put(
+                f"/v1/projects/{project}/subscriptions/{subscription}",
+                json={"name": sub_path, "topic": topic_path},
+            )
+        )
     print(f"Created subscription {data.get('name', subscription)}.")
 
 
@@ -364,13 +401,14 @@ def _pubsub_subs_delete(project: str, subscription: str, **_) -> None:
     print(f"Deleted subscription projects/{project}/subscriptions/{subscription}.")
 
 
-def _pubsub_subs_pull(project: str, subscription: str, max_messages: int, follow: bool, auto_ack: bool, **_) -> None:
+def _pubsub_subs_pull(
+    project: str, subscription: str, max_messages: int, follow: bool, auto_ack: bool, **_
+) -> None:
     sub_path = f"/v1/projects/{project}/subscriptions/{subscription}"
 
     def _pull_once() -> int:
         with _client("pubsub") as c:
-            data = _check(c.post(f"{sub_path}:pull",
-                                 json={"maxMessages": max_messages}))
+            data = _check(c.post(f"{sub_path}:pull", json={"maxMessages": max_messages}))
         received = data.get("receivedMessages", [])
         if not received:
             return 0
@@ -418,19 +456,26 @@ def _pubsub_subs_pull(project: str, subscription: str, max_messages: int, follow
 # secrets
 # ---------------------------------------------------------------------------
 
+
 def _secrets_list(project: str, **_) -> None:
     with _client("secrets") as c:
         data = _check(c.get(f"/v1/projects/{project}/secrets"))
     secrets = data.get("secrets", [])
-    _table([{"name": s["name"], "createTime": s.get("createTime", "")} for s in secrets],
-           ["name", "createTime"])
+    _table(
+        [{"name": s["name"], "createTime": s.get("createTime", "")} for s in secrets],
+        ["name", "createTime"],
+    )
 
 
 def _secrets_create(project: str, secret: str, **_) -> None:
     with _client("secrets") as c:
-        data = _check(c.post(f"/v1/projects/{project}/secrets",
-                             params={"secretId": secret},
-                             json={"replication": {"automatic": {}}}))
+        data = _check(
+            c.post(
+                f"/v1/projects/{project}/secrets",
+                params={"secretId": secret},
+                json={"replication": {"automatic": {}}},
+            )
+        )
     print(f"Created secret {data.get('name', secret)}.")
 
 
@@ -446,8 +491,9 @@ def _secrets_delete(project: str, secret: str, **_) -> None:
     print(f"Deleted secret projects/{project}/secrets/{secret}.")
 
 
-def _secrets_versions_add(project: str, secret: str, data_value: str | None,
-                          data_file: str | None, **_) -> None:
+def _secrets_versions_add(
+    project: str, secret: str, data_value: str | None, data_file: str | None, **_
+) -> None:
     if data_file:
         p = Path(data_file)
         if data_file == "-":
@@ -462,8 +508,12 @@ def _secrets_versions_add(project: str, secret: str, data_value: str | None,
         raise SystemExit("Provide --data or --data-file.")
     encoded = base64.b64encode(raw).decode()
     with _client("secrets") as c:
-        data = _check(c.post(f"/v1/projects/{project}/secrets/{secret}:addVersion",
-                             json={"payload": {"data": encoded}}))
+        data = _check(
+            c.post(
+                f"/v1/projects/{project}/secrets/{secret}:addVersion",
+                json={"payload": {"data": encoded}},
+            )
+        )
     print(f"Created version {data.get('name', '?')}.")
 
 
@@ -471,14 +521,18 @@ def _secrets_versions_list(project: str, secret: str, **_) -> None:
     with _client("secrets") as c:
         data = _check(c.get(f"/v1/projects/{project}/secrets/{secret}/versions"))
     versions = data.get("versions", [])
-    _table([{"name": v["name"], "state": v.get("state", ""), "createTime": v.get("createTime", "")}
-            for v in versions], ["name", "state", "createTime"])
+    _table(
+        [
+            {"name": v["name"], "state": v.get("state", ""), "createTime": v.get("createTime", "")}
+            for v in versions
+        ],
+        ["name", "state", "createTime"],
+    )
 
 
 def _secrets_versions_access(project: str, secret: str, version: str, **_) -> None:
     with _client("secrets") as c:
-        data = _check(c.post(
-            f"/v1/projects/{project}/secrets/{secret}/versions/{version}:access"))
+        data = _check(c.post(f"/v1/projects/{project}/secrets/{secret}/versions/{version}:access"))
     payload_b64 = data.get("payload", {}).get("data", "")
     try:
         print(base64.b64decode(payload_b64).decode("utf-8"))
@@ -488,8 +542,9 @@ def _secrets_versions_access(project: str, secret: str, version: str, **_) -> No
 
 def _secrets_versions_action(project: str, secret: str, version: str, action: str, **_) -> None:
     with _client("secrets") as c:
-        data = _check(c.post(
-            f"/v1/projects/{project}/secrets/{secret}/versions/{version}:{action}"))
+        data = _check(
+            c.post(f"/v1/projects/{project}/secrets/{secret}/versions/{version}:{action}")
+        )
     print(f"{action.capitalize()}d version {data.get('name', version)}.")
 
 
@@ -497,26 +552,26 @@ def _secrets_versions_action(project: str, secret: str, version: str, action: st
 # firestore
 # ---------------------------------------------------------------------------
 
+
 def _firestore_documents_list(project: str, collection: str, database: str, **_) -> None:
     with _client("firestore") as c:
-        data = _check(c.get(
-            f"/v1/projects/{project}/databases/{database}/documents/{collection}"))
+        data = _check(c.get(f"/v1/projects/{project}/databases/{database}/documents/{collection}"))
     docs = data.get("documents", [])
-    _table([{"name": d["name"], "updateTime": d.get("updateTime", "")} for d in docs],
-           ["name", "updateTime"])
+    _table(
+        [{"name": d["name"], "updateTime": d.get("updateTime", "")} for d in docs],
+        ["name", "updateTime"],
+    )
 
 
 def _firestore_documents_get(project: str, path: str, database: str, **_) -> None:
     with _client("firestore") as c:
-        data = _check(c.get(
-            f"/v1/projects/{project}/databases/{database}/documents/{path}"))
+        data = _check(c.get(f"/v1/projects/{project}/databases/{database}/documents/{path}"))
     _print(data)
 
 
 def _firestore_documents_delete(project: str, path: str, database: str, **_) -> None:
     with _client("firestore") as c:
-        _check(c.delete(
-            f"/v1/projects/{project}/databases/{database}/documents/{path}"))
+        _check(c.delete(f"/v1/projects/{project}/databases/{database}/documents/{path}"))
     print(f"Deleted document {path}.")
 
 
@@ -524,18 +579,22 @@ def _firestore_documents_delete(project: str, path: str, database: str, **_) -> 
 # tasks queues
 # ---------------------------------------------------------------------------
 
+
 def _tasks_queues_list(project: str, location: str, **_) -> None:
     with _client("tasks") as c:
         data = _check(c.get(f"/v2/projects/{project}/locations/{location}/queues"))
     queues = data.get("queues", [])
-    _table([{"name": q["name"], "state": q.get("state", "")} for q in queues],
-           ["name", "state"])
+    _table([{"name": q["name"], "state": q.get("state", "")} for q in queues], ["name", "state"])
 
 
 def _tasks_queues_create(project: str, location: str, queue: str, **_) -> None:
     with _client("tasks") as c:
-        data = _check(c.post(f"/v2/projects/{project}/locations/{location}/queues",
-                             json={"name": f"projects/{project}/locations/{location}/queues/{queue}"}))
+        data = _check(
+            c.post(
+                f"/v2/projects/{project}/locations/{location}/queues",
+                json={"name": f"projects/{project}/locations/{location}/queues/{queue}"},
+            )
+        )
     print(f"Created queue {data.get('name', queue)}.")
 
 
@@ -553,8 +612,9 @@ def _tasks_queues_delete(project: str, location: str, queue: str, **_) -> None:
 
 def _tasks_queues_action(project: str, location: str, queue: str, action: str, **_) -> None:
     with _client("tasks") as c:
-        data = _check(c.post(
-            f"/v2/projects/{project}/locations/{location}/queues/{queue}:{action}"))
+        data = _check(
+            c.post(f"/v2/projects/{project}/locations/{location}/queues/{queue}:{action}")
+        )
     print(f"{action.capitalize()}d queue {data.get('name', queue)}.")
 
 
@@ -562,52 +622,66 @@ def _tasks_queues_action(project: str, location: str, queue: str, action: str, *
 # tasks tasks
 # ---------------------------------------------------------------------------
 
+
 def _tasks_tasks_list(project: str, location: str, queue: str, **_) -> None:
     with _client("tasks") as c:
-        data = _check(c.get(
-            f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks"))
+        data = _check(c.get(f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks"))
     tasks = data.get("tasks", [])
-    _table([{"name": t["name"], "scheduleTime": t.get("scheduleTime", ""),
-             "createTime": t.get("createTime", "")} for t in tasks],
-           ["name", "scheduleTime", "createTime"])
+    _table(
+        [
+            {
+                "name": t["name"],
+                "scheduleTime": t.get("scheduleTime", ""),
+                "createTime": t.get("createTime", ""),
+            }
+            for t in tasks
+        ],
+        ["name", "scheduleTime", "createTime"],
+    )
 
 
-def _tasks_tasks_create(project: str, location: str, queue: str,
-                        url: str, method: str, body: str | None, **_) -> None:
+def _tasks_tasks_create(
+    project: str, location: str, queue: str, url: str, method: str, body: str | None, **_
+) -> None:
     http_req: dict[str, Any] = {"url": url, "httpMethod": method.upper()}
     if body:
         http_req["body"] = base64.b64encode(body.encode()).decode()
     with _client("tasks") as c:
-        data = _check(c.post(
-            f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks",
-            json={"task": {"httpRequest": http_req}}))
+        data = _check(
+            c.post(
+                f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks",
+                json={"task": {"httpRequest": http_req}},
+            )
+        )
     print(f"Created task {data.get('name', '?')}.")
 
 
 def _tasks_tasks_describe(project: str, location: str, queue: str, task: str, **_) -> None:
     with _client("tasks") as c:
-        data = _check(c.get(
-            f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"))
+        data = _check(
+            c.get(f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}")
+        )
     _print(data)
 
 
 def _tasks_tasks_delete(project: str, location: str, queue: str, task: str, **_) -> None:
     with _client("tasks") as c:
-        _check(c.delete(
-            f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"))
+        _check(c.delete(f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}"))
     print(f"Deleted task {task}.")
 
 
 def _tasks_tasks_run(project: str, location: str, queue: str, task: str, **_) -> None:
     with _client("tasks") as c:
-        data = _check(c.post(
-            f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}:run"))
+        data = _check(
+            c.post(f"/v2/projects/{project}/locations/{location}/queues/{queue}/tasks/{task}:run")
+        )
     print(f"Dispatched task {data.get('name', task)}.")
 
 
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
@@ -617,8 +691,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     root.add_argument("--project", default=DEFAULT_PROJECT, help="GCP project ID")
     root.add_argument("--location", default=DEFAULT_LOCATION, help="GCP location/region")
-    root.add_argument("--format", choices=["default", "json"], default="default",
-                      dest="output_format", help="Output format")
+    root.add_argument(
+        "--format",
+        choices=["default", "json"],
+        default="default",
+        dest="output_format",
+        help="Output format",
+    )
 
     svc = root.add_subparsers(dest="service", metavar="SERVICE")
     svc.required = True
@@ -661,12 +740,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_nc = p_notifs_sub.add_parser("create", help="Create a notification config")
     p_nc.add_argument("bucket", metavar="gs://BUCKET")
     p_nc.add_argument("--topic", required=True, help="Pub/Sub topic name or full path")
-    p_nc.add_argument("--event-types", dest="event_types", nargs="+", default=[],
-                      metavar="TYPE",
-                      help="Event types to notify on (default: all). "
-                           "E.g. OBJECT_FINALIZE OBJECT_DELETE")
-    p_nc.add_argument("--payload-format", dest="payload_format", default="JSON_API_V1",
-                      choices=["JSON_API_V1", "NONE"], help="Message payload format")
+    p_nc.add_argument(
+        "--event-types",
+        dest="event_types",
+        nargs="+",
+        default=[],
+        metavar="TYPE",
+        help="Event types to notify on (default: all). E.g. OBJECT_FINALIZE OBJECT_DELETE",
+    )
+    p_nc.add_argument(
+        "--payload-format",
+        dest="payload_format",
+        default="JSON_API_V1",
+        choices=["JSON_API_V1", "NONE"],
+        help="Message payload format",
+    )
     p_nd = p_notifs_sub.add_parser("delete", help="Delete a notification config")
     p_nd.add_argument("bucket", metavar="gs://BUCKET")
     p_nd.add_argument("notification_id", help="Notification config ID")
@@ -695,8 +783,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_tpub = p_topics_sub.add_parser("publish", help="Publish a message to a topic")
     p_tpub.add_argument("topic")
     p_tpub.add_argument("--message", required=True, help="Message payload (UTF-8 text)")
-    p_tpub.add_argument("--attribute", dest="attributes", action="append", default=[],
-                        metavar="KEY=VALUE", help="Message attribute (repeatable)")
+    p_tpub.add_argument(
+        "--attribute",
+        dest="attributes",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Message attribute (repeatable)",
+    )
 
     # pubsub subscriptions
     p_subs = p_pubsub_sub.add_parser("subscriptions", help="Manage subscriptions")
@@ -713,10 +807,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_spull = p_subs_sub.add_parser("pull", help="Pull messages from a subscription")
     p_spull.add_argument("subscription")
     p_spull.add_argument("--max-messages", type=int, default=10)
-    p_spull.add_argument("--follow", action="store_true", default=False,
-                         help="Keep pulling until Ctrl-C")
-    p_spull.add_argument("--no-auto-ack", dest="auto_ack", action="store_false", default=True,
-                         help="Do not acknowledge pulled messages")
+    p_spull.add_argument(
+        "--follow", action="store_true", default=False, help="Keep pulling until Ctrl-C"
+    )
+    p_spull.add_argument(
+        "--no-auto-ack",
+        dest="auto_ack",
+        action="store_false",
+        default=True,
+        help="Do not acknowledge pulled messages",
+    )
 
     # --- secrets ---
     p_secrets = svc.add_parser("secrets", help="Secret Manager")
@@ -724,8 +824,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_secrets_sub.required = True
 
     # secrets (top-level verbs)
-    for verb, help_text in [("list", "List secrets"), ("create", "Create a secret"),
-                             ("describe", "Describe a secret"), ("delete", "Delete a secret")]:
+    for verb, help_text in [
+        ("list", "List secrets"),
+        ("create", "Create a secret"),
+        ("describe", "Describe a secret"),
+        ("delete", "Delete a secret"),
+    ]:
         ps = p_secrets_sub.add_parser(verb, help=help_text)
         if verb in ("create", "describe", "delete"):
             ps.add_argument("secret", help="Secret ID")
@@ -738,7 +842,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_svadd = p_sv_sub.add_parser("add", help="Add a new version")
     p_svadd.add_argument("secret", help="Secret ID")
     p_svadd.add_argument("--data", dest="data_value", default=None, help="Secret value as string")
-    p_svadd.add_argument("--data-file", default=None, help="File to read secret value from (- for stdin)")
+    p_svadd.add_argument(
+        "--data-file", default=None, help="File to read secret value from (- for stdin)"
+    )
 
     p_svlist = p_sv_sub.add_parser("list", help="List versions of a secret")
     p_svlist.add_argument("secret")
@@ -813,6 +919,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # --- gsutil shortcuts ---
     from cloudbox.gsutillocal import register_subparsers as _register_gsutil
+
     _register_gsutil(svc)
 
     return root
@@ -824,59 +931,63 @@ def _build_parser() -> argparse.ArgumentParser:
 
 _DISPATCH = {
     # storage
-    ("storage", "buckets", "list"):     _storage_buckets_list,
-    ("storage", "buckets", "create"):   _storage_buckets_create,
+    ("storage", "buckets", "list"): _storage_buckets_list,
+    ("storage", "buckets", "create"): _storage_buckets_create,
     ("storage", "buckets", "describe"): _storage_buckets_describe,
-    ("storage", "buckets", "delete"):   _storage_buckets_delete,
-    ("storage", "objects", "list"):     _storage_objects_list,
+    ("storage", "buckets", "delete"): _storage_buckets_delete,
+    ("storage", "objects", "list"): _storage_objects_list,
     ("storage", "objects", "describe"): _storage_objects_describe,
-    ("storage", "objects", "delete"):   _storage_objects_delete,
-    ("storage", "notifications", "list"):   _storage_notifications_list,
+    ("storage", "objects", "delete"): _storage_objects_delete,
+    ("storage", "notifications", "list"): _storage_notifications_list,
     ("storage", "notifications", "create"): _storage_notifications_create,
     ("storage", "notifications", "delete"): _storage_notifications_delete,
-    ("storage", "cp", None):            _storage_cp,
+    ("storage", "cp", None): _storage_cp,
     # pubsub topics
-    ("pubsub", "topics", "list"):       _pubsub_topics_list,
-    ("pubsub", "topics", "create"):     _pubsub_topics_create,
-    ("pubsub", "topics", "describe"):   _pubsub_topics_describe,
-    ("pubsub", "topics", "delete"):     _pubsub_topics_delete,
-    ("pubsub", "topics", "publish"):    _pubsub_topics_publish,
+    ("pubsub", "topics", "list"): _pubsub_topics_list,
+    ("pubsub", "topics", "create"): _pubsub_topics_create,
+    ("pubsub", "topics", "describe"): _pubsub_topics_describe,
+    ("pubsub", "topics", "delete"): _pubsub_topics_delete,
+    ("pubsub", "topics", "publish"): _pubsub_topics_publish,
     # pubsub subscriptions
-    ("pubsub", "subscriptions", "list"):     _pubsub_subs_list,
-    ("pubsub", "subscriptions", "create"):   _pubsub_subs_create,
+    ("pubsub", "subscriptions", "list"): _pubsub_subs_list,
+    ("pubsub", "subscriptions", "create"): _pubsub_subs_create,
     ("pubsub", "subscriptions", "describe"): _pubsub_subs_describe,
-    ("pubsub", "subscriptions", "delete"):   _pubsub_subs_delete,
-    ("pubsub", "subscriptions", "pull"):     _pubsub_subs_pull,
+    ("pubsub", "subscriptions", "delete"): _pubsub_subs_delete,
+    ("pubsub", "subscriptions", "pull"): _pubsub_subs_pull,
     # secrets top-level
-    ("secrets", "list", None):     _secrets_list,
-    ("secrets", "create", None):   _secrets_create,
+    ("secrets", "list", None): _secrets_list,
+    ("secrets", "create", None): _secrets_create,
     ("secrets", "describe", None): _secrets_describe,
-    ("secrets", "delete", None):   _secrets_delete,
+    ("secrets", "delete", None): _secrets_delete,
     # secrets versions
-    ("secrets", "versions", "add"):     _secrets_versions_add,
-    ("secrets", "versions", "list"):    _secrets_versions_list,
-    ("secrets", "versions", "access"):  _secrets_versions_access,
-    ("secrets", "versions", "enable"):  lambda **kw: _secrets_versions_action(action="enable", **kw),
-    ("secrets", "versions", "disable"): lambda **kw: _secrets_versions_action(action="disable", **kw),
-    ("secrets", "versions", "destroy"): lambda **kw: _secrets_versions_action(action="destroy", **kw),
+    ("secrets", "versions", "add"): _secrets_versions_add,
+    ("secrets", "versions", "list"): _secrets_versions_list,
+    ("secrets", "versions", "access"): _secrets_versions_access,
+    ("secrets", "versions", "enable"): lambda **kw: _secrets_versions_action(action="enable", **kw),
+    ("secrets", "versions", "disable"): lambda **kw: _secrets_versions_action(
+        action="disable", **kw
+    ),
+    ("secrets", "versions", "destroy"): lambda **kw: _secrets_versions_action(
+        action="destroy", **kw
+    ),
     # firestore
-    ("firestore", "documents", "list"):   _firestore_documents_list,
-    ("firestore", "documents", "get"):    _firestore_documents_get,
+    ("firestore", "documents", "list"): _firestore_documents_list,
+    ("firestore", "documents", "get"): _firestore_documents_get,
     ("firestore", "documents", "delete"): _firestore_documents_delete,
     # tasks queues
-    ("tasks", "queues", "list"):     _tasks_queues_list,
-    ("tasks", "queues", "create"):   _tasks_queues_create,
+    ("tasks", "queues", "list"): _tasks_queues_list,
+    ("tasks", "queues", "create"): _tasks_queues_create,
     ("tasks", "queues", "describe"): _tasks_queues_describe,
-    ("tasks", "queues", "delete"):   _tasks_queues_delete,
-    ("tasks", "queues", "pause"):    lambda **kw: _tasks_queues_action(action="pause", **kw),
-    ("tasks", "queues", "resume"):   lambda **kw: _tasks_queues_action(action="resume", **kw),
-    ("tasks", "queues", "purge"):    lambda **kw: _tasks_queues_action(action="purge", **kw),
+    ("tasks", "queues", "delete"): _tasks_queues_delete,
+    ("tasks", "queues", "pause"): lambda **kw: _tasks_queues_action(action="pause", **kw),
+    ("tasks", "queues", "resume"): lambda **kw: _tasks_queues_action(action="resume", **kw),
+    ("tasks", "queues", "purge"): lambda **kw: _tasks_queues_action(action="purge", **kw),
     # tasks tasks
-    ("tasks", "tasks", "list"):     _tasks_tasks_list,
-    ("tasks", "tasks", "create"):   _tasks_tasks_create,
+    ("tasks", "tasks", "list"): _tasks_tasks_list,
+    ("tasks", "tasks", "create"): _tasks_tasks_create,
     ("tasks", "tasks", "describe"): _tasks_tasks_describe,
-    ("tasks", "tasks", "delete"):   _tasks_tasks_delete,
-    ("tasks", "tasks", "run"):      _tasks_tasks_run,
+    ("tasks", "tasks", "delete"): _tasks_tasks_delete,
+    ("tasks", "tasks", "run"): _tasks_tasks_run,
 }
 
 
@@ -897,6 +1008,7 @@ def main() -> None:
     # gsutil-style flat commands (ls, cp, mv, mb, rb, rm, cat, stat, du)
     if service in _GSUTIL_SHORTCUTS:
         from cloudbox.gsutillocal import _COMMANDS as _gsutil_cmds
+
         # Provide defaults for flags that gsutillocal subparsers may not set
         # when called through gcloudlocal (where the dest key is 'service'
         # rather than 'command').

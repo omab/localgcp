@@ -1,7 +1,9 @@
 """Pydantic models for Cloud Scheduler REST API v1."""
+
 from __future__ import annotations
 
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -25,11 +27,11 @@ class JobModel(BaseModel):
     description: str = ""
     schedule: str = ""
     timeZone: str = "UTC"
-    state: str = "ENABLED"          # ENABLED, PAUSED, DISABLED
+    state: str = "ENABLED"  # ENABLED, PAUSED, DISABLED
     httpTarget: HttpTarget | None = None
     retryConfig: RetryConfig = Field(default_factory=RetryConfig)
     userUpdateTime: str = ""
-    scheduleTime: str = ""          # next scheduled run
+    scheduleTime: str = ""  # next scheduled run
     lastAttemptTime: str = ""
     status: dict[str, Any] = Field(default_factory=dict)
 

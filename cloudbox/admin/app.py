@@ -3,9 +3,11 @@
 Provides a web dashboard showing the state of all emulated services,
 allowing data to be browsed, interacted with, and reset.
 """
+
 from __future__ import annotations
 
 import base64
+from datetime import UTC
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Request
@@ -32,13 +34,13 @@ _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 def _get_services() -> dict:
+    from cloudbox.services.bigquery.engine import get_engine as bq_get_engine
+    from cloudbox.services.firestore.store import get_store as firestore_store
     from cloudbox.services.gcs.store import get_store as gcs_store
     from cloudbox.services.pubsub.store import get_store as pubsub_store
-    from cloudbox.services.firestore.store import get_store as firestore_store
     from cloudbox.services.secretmanager.store import get_store as sm_store
     from cloudbox.services.tasks.store import get_store as tasks_store
 
-    from cloudbox.services.bigquery.engine import get_engine as bq_get_engine
     bq = bq_get_engine()
     bq_datasets = bq.list_datasets(settings.default_project)
     bq_table_count = sum(
@@ -47,11 +49,13 @@ def _get_services() -> dict:
     )
 
     from cloudbox.services.logging.store import get_store as logging_store
+
     ls = logging_store()
     log_entry_count = len(ls.list("entries"))
     log_sink_count = len(ls.list("sinks"))
 
     from cloudbox.services.spanner.engine import get_engine as spanner_get_engine
+
     sp = spanner_get_engine()
     sp_instances = sp.list_instances(settings.default_project)
     sp_db_count = sum(
@@ -60,6 +64,7 @@ def _get_services() -> dict:
     )
 
     from cloudbox.services.scheduler.store import get_store as scheduler_store
+
     sched = scheduler_store()
     sched_jobs = sched.list("jobs")
     sched_enabled = sum(1 for j in sched_jobs if j.get("state") == "ENABLED")
@@ -127,17 +132,21 @@ async def dashboard(request: Request):
 
 @app.get("/api/stats")
 async def api_stats():
-    return JSONResponse(content={
-        "project": settings.default_project,
-        "services": _get_services(),
-    })
+    return JSONResponse(
+        content={
+            "project": settings.default_project,
+            "services": _get_services(),
+        }
+    )
 
 
 # ── GCS ──────────────────────────────────────────────────────────────────────
 
+
 @app.get("/api/gcs/buckets")
 async def api_gcs_buckets():
     from cloudbox.services.gcs.store import get_store
+
     store = get_store()
     buckets = store.list("buckets")
     result = []
@@ -151,6 +160,7 @@ async def api_gcs_buckets():
 @app.get("/api/gcs/notifications")
 async def api_gcs_notifications(bucket: str = Query(...)):
     from cloudbox.services.gcs.store import get_store
+
     store = get_store()
     prefix = f"{bucket}/"
     result = []
@@ -164,6 +174,7 @@ async def api_gcs_notifications(bucket: str = Query(...)):
 @app.get("/api/gcs/download")
 async def api_gcs_download(bucket: str = Query(...), name: str = Query(...)):
     from cloudbox.services.gcs.store import get_store
+
     store = get_store()
     key = f"{bucket}/{name}"
     data = store.get("objects", key)
@@ -182,6 +193,7 @@ async def api_gcs_download(bucket: str = Query(...), name: str = Query(...)):
 @app.get("/api/gcs/objects")
 async def api_gcs_objects(bucket: str = Query(...)):
     from cloudbox.services.gcs.store import get_store
+
     store = get_store()
     prefix = f"{bucket}/"
     items = []
@@ -195,6 +207,7 @@ async def api_gcs_objects(bucket: str = Query(...)):
 @app.delete("/api/gcs/buckets")
 async def api_gcs_delete_bucket(bucket: str = Query(...)):
     from cloudbox.services.gcs.store import get_store
+
     store = get_store()
     for k in list(store.keys("objects")):
         if k.startswith(f"{bucket}/"):
@@ -207,6 +220,7 @@ async def api_gcs_delete_bucket(bucket: str = Query(...)):
 @app.delete("/api/gcs/objects")
 async def api_gcs_delete_object(bucket: str = Query(...), name: str = Query(...)):
     from cloudbox.services.gcs.store import get_store
+
     store = get_store()
     key = f"{bucket}/{name}"
     store.delete("objects", key)
@@ -216,9 +230,11 @@ async def api_gcs_delete_object(bucket: str = Query(...), name: str = Query(...)
 
 # ── Pub/Sub ───────────────────────────────────────────────────────────────────
 
+
 @app.get("/api/pubsub/topics")
 async def api_pubsub_topics():
     from cloudbox.services.pubsub.store import get_store, retained_count
+
     store = get_store()
     topics = store.list("topics")
     subs = store.list("subscriptions")
@@ -232,19 +248,23 @@ async def api_pubsub_topics():
 @app.get("/api/pubsub/subscriptions")
 async def api_pubsub_subscriptions():
     from cloudbox.services.pubsub.store import get_store, queue_depth, unacked_count
+
     store = get_store()
     subs = store.list("subscriptions")
     result = []
     for s in sorted(subs, key=lambda x: x["name"]):
-        result.append({**s, "queueDepth": queue_depth(s["name"]), "unackedCount": unacked_count(s["name"])})
+        result.append(
+            {**s, "queueDepth": queue_depth(s["name"]), "unackedCount": unacked_count(s["name"])}
+        )
     return result
 
 
 @app.post("/api/pubsub/publish")
 async def api_pubsub_publish(request: Request):
     import uuid
-    from datetime import datetime, timezone
-    from cloudbox.services.pubsub.store import get_store, ensure_queue, enqueue
+    from datetime import datetime
+
+    from cloudbox.services.pubsub.store import enqueue, ensure_queue, get_store
 
     body = await request.json()
     topic = body.get("topic", "")
@@ -257,7 +277,7 @@ async def api_pubsub_publish(request: Request):
 
     encoded = base64.b64encode(data.encode()).decode() if data else ""
     msg_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     message = {
         "data": encoded,
         "attributes": attributes,
@@ -279,6 +299,7 @@ async def api_pubsub_publish(request: Request):
 @app.delete("/api/pubsub/topics")
 async def api_pubsub_delete_topic(topic: str = Query(...)):
     from cloudbox.services.pubsub.store import get_store, remove_queue
+
     store = get_store()
     store.delete("topics", topic)
     for s in store.list("subscriptions"):
@@ -291,6 +312,7 @@ async def api_pubsub_delete_topic(topic: str = Query(...)):
 @app.delete("/api/pubsub/subscriptions")
 async def api_pubsub_delete_subscription(subscription: str = Query(...)):
     from cloudbox.services.pubsub.store import get_store, remove_queue
+
     store = get_store()
     store.delete("subscriptions", subscription)
     remove_queue(subscription)
@@ -299,9 +321,11 @@ async def api_pubsub_delete_subscription(subscription: str = Query(...)):
 
 # ── Firestore ─────────────────────────────────────────────────────────────────
 
+
 @app.get("/api/firestore/collections")
 async def api_firestore_collections():
     from cloudbox.services.firestore.store import get_store
+
     store = get_store()
     counts: dict[str, int] = {}
     for key in store.keys("documents"):
@@ -316,6 +340,7 @@ async def api_firestore_collections():
 @app.get("/api/firestore/documents")
 async def api_firestore_documents(collection: str = Query(...)):
     from cloudbox.services.firestore.store import get_store
+
     store = get_store()
     docs = []
     for key in store.keys("documents"):
@@ -332,15 +357,18 @@ async def api_firestore_documents(collection: str = Query(...)):
 @app.delete("/api/firestore/documents")
 async def api_firestore_delete_document(path: str = Query(...)):
     from cloudbox.services.firestore.store import get_store
+
     get_store().delete("documents", path)
     return {"deleted": path}
 
 
 # ── Secret Manager ────────────────────────────────────────────────────────────
 
+
 @app.get("/api/secretmanager/secrets")
 async def api_sm_secrets():
     from cloudbox.services.secretmanager.store import get_store
+
     store = get_store()
     secrets = store.list("secrets")
     result = []
@@ -354,10 +382,9 @@ async def api_sm_secrets():
 async def api_sm_versions(secret: str = Query(...)):
     """List versions for a secret identified by its short name (e.g. 'my-secret')."""
     from cloudbox.services.secretmanager.store import get_store
+
     store = get_store()
-    full_name = next(
-        (k for k in store.keys("secrets") if k.endswith(f"/secrets/{secret}")), None
-    )
+    full_name = next((k for k in store.keys("secrets") if k.endswith(f"/secrets/{secret}")), None)
     if full_name is None:
         return JSONResponse(status_code=404, content={"error": "Secret not found"})
     prefix = f"{full_name}/versions/"
@@ -372,10 +399,9 @@ async def api_sm_versions(secret: str = Query(...)):
 async def api_sm_value(secret: str = Query(...), version: str = Query(...)):
     """Return the decoded payload for a secret version."""
     from cloudbox.services.secretmanager.store import get_store
+
     store = get_store()
-    full_name = next(
-        (k for k in store.keys("secrets") if k.endswith(f"/secrets/{secret}")), None
-    )
+    full_name = next((k for k in store.keys("secrets") if k.endswith(f"/secrets/{secret}")), None)
     if full_name is None:
         return JSONResponse(status_code=404, content={"error": "Secret not found"})
     version_key = f"{full_name}/versions/{version}"
@@ -392,10 +418,9 @@ async def api_sm_value(secret: str = Query(...), version: str = Query(...)):
 @app.delete("/api/secretmanager/secrets")
 async def api_sm_delete_secret(secret: str = Query(...)):
     from cloudbox.services.secretmanager.store import get_store
+
     store = get_store()
-    full_name = next(
-        (k for k in store.keys("secrets") if k.endswith(f"/secrets/{secret}")), None
-    )
+    full_name = next((k for k in store.keys("secrets") if k.endswith(f"/secrets/{secret}")), None)
     if full_name is None:
         return JSONResponse(status_code=404, content={"error": "Secret not found"})
     store.delete("secrets", full_name)
@@ -408,9 +433,11 @@ async def api_sm_delete_secret(secret: str = Query(...)):
 
 # ── Cloud Tasks ───────────────────────────────────────────────────────────────
 
+
 @app.get("/api/tasks/queues")
 async def api_tasks_queues():
     from cloudbox.services.tasks.store import get_store
+
     store = get_store()
     queues = store.list("queues")
     result = []
@@ -423,6 +450,7 @@ async def api_tasks_queues():
 @app.get("/api/tasks/tasks")
 async def api_tasks_list(queue: str = Query(...)):
     from cloudbox.services.tasks.store import get_store
+
     store = get_store()
     prefix = f"{queue}/tasks/"
     tasks = [
@@ -435,15 +463,18 @@ async def api_tasks_list(queue: str = Query(...)):
 @app.delete("/api/tasks/task")
 async def api_tasks_delete_task(task: str = Query(...)):
     from cloudbox.services.tasks.store import get_store
+
     get_store().delete("tasks", task)
     return {"deleted": task}
 
 
 # ── BigQuery ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/api/bigquery/datasets")
 async def api_bq_datasets():
     from cloudbox.services.bigquery.engine import get_engine
+
     engine = get_engine()
     project = settings.default_project
     datasets = engine.list_datasets(project)
@@ -451,17 +482,20 @@ async def api_bq_datasets():
     for d in sorted(datasets, key=lambda x: x["datasetReference"]["datasetId"]):
         ds_id = d["datasetReference"]["datasetId"]
         tables = engine.list_tables(project, ds_id)
-        result.append({
-            "datasetId": ds_id,
-            "location": d.get("location", "US"),
-            "tableCount": len(tables),
-        })
+        result.append(
+            {
+                "datasetId": ds_id,
+                "location": d.get("location", "US"),
+                "tableCount": len(tables),
+            }
+        )
     return result
 
 
 @app.get("/api/bigquery/tables")
 async def api_bq_tables(dataset: str = Query(...)):
     from cloudbox.services.bigquery.engine import get_engine
+
     engine = get_engine()
     tables = engine.list_tables(settings.default_project, dataset)
     return [
@@ -481,6 +515,7 @@ async def api_bq_preview(
     maxResults: int = Query(default=50),
 ):
     from cloudbox.services.bigquery.engine import get_engine
+
     engine = get_engine()
     try:
         return engine.list_rows(settings.default_project, dataset, table, max_results=maxResults)
@@ -491,6 +526,7 @@ async def api_bq_preview(
 @app.delete("/api/bigquery/dataset")
 async def api_bq_delete_dataset(dataset: str = Query(...)):
     from cloudbox.services.bigquery.engine import get_engine
+
     engine = get_engine()
     try:
         engine.delete_dataset(settings.default_project, dataset, delete_contents=True)
@@ -502,6 +538,7 @@ async def api_bq_delete_dataset(dataset: str = Query(...)):
 @app.delete("/api/bigquery/table")
 async def api_bq_delete_table(dataset: str = Query(...), table: str = Query(...)):
     from cloudbox.services.bigquery.engine import get_engine
+
     engine = get_engine()
     found = engine.delete_table(settings.default_project, dataset, table)
     if not found:
@@ -511,6 +548,7 @@ async def api_bq_delete_table(dataset: str = Query(...), table: str = Query(...)
 
 # ── Cloud Logging ─────────────────────────────────────────────────────────────
 
+
 @app.get("/api/logging/entries")
 async def api_logging_entries(
     log: str = Query(default=""),
@@ -518,14 +556,20 @@ async def api_logging_entries(
     limit: int = Query(default=100),
 ):
     from cloudbox.services.logging.store import get_store
+
     store = get_store()
     entries = store.list("entries")
     if log:
         entries = [e for e in entries if e.get("logName", "").endswith(f"/logs/{log}")]
     if severity:
         from cloudbox.services.logging.app import _SEVERITY_ORDER
+
         min_level = _SEVERITY_ORDER.get(severity.upper(), 0)
-        entries = [e for e in entries if _SEVERITY_ORDER.get(e.get("severity", "DEFAULT").upper(), 0) >= min_level]
+        entries = [
+            e
+            for e in entries
+            if _SEVERITY_ORDER.get(e.get("severity", "DEFAULT").upper(), 0) >= min_level
+        ]
     entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
     return entries[:limit]
 
@@ -533,6 +577,7 @@ async def api_logging_entries(
 @app.get("/api/logging/logs")
 async def api_logging_logs():
     from cloudbox.services.logging.store import get_store
+
     store = get_store()
     entries = store.list("entries")
     log_names = sorted({e.get("logName", "") for e in entries if e.get("logName")})
@@ -542,6 +587,7 @@ async def api_logging_logs():
 @app.delete("/api/logging/entries")
 async def api_logging_clear(log: str = Query(default="")):
     from cloudbox.services.logging.store import get_store
+
     store = get_store()
     if log:
         all_keys = store.keys("entries")
@@ -556,44 +602,52 @@ async def api_logging_clear(log: str = Query(default="")):
 
 # ── Cloud Spanner ─────────────────────────────────────────────────────────────
 
+
 @app.get("/api/spanner/instances")
 async def api_spanner_instances():
     from cloudbox.services.spanner.engine import get_engine
+
     engine = get_engine()
     instances = engine.list_instances(settings.default_project)
     result = []
     for inst in sorted(instances, key=lambda x: x["name"]):
         instance_id = inst["name"].rsplit("/", 1)[-1]
         dbs = engine.list_databases(settings.default_project, instance_id)
-        result.append({
-            "instanceId": instance_id,
-            "displayName": inst.get("displayName", instance_id),
-            "state": inst.get("state", "READY"),
-            "databaseCount": len(dbs),
-        })
+        result.append(
+            {
+                "instanceId": instance_id,
+                "displayName": inst.get("displayName", instance_id),
+                "state": inst.get("state", "READY"),
+                "databaseCount": len(dbs),
+            }
+        )
     return result
 
 
 @app.get("/api/spanner/databases")
 async def api_spanner_databases(instance: str = Query(...)):
     from cloudbox.services.spanner.engine import get_engine
+
     engine = get_engine()
     dbs = engine.list_databases(settings.default_project, instance)
     result = []
     for db in sorted(dbs, key=lambda x: x["name"]):
         database_id = db["name"].rsplit("/", 1)[-1]
         tables = engine.list_tables(settings.default_project, instance, database_id)
-        result.append({
-            "databaseId": database_id,
-            "state": db.get("state", "READY"),
-            "tableCount": len(tables),
-        })
+        result.append(
+            {
+                "databaseId": database_id,
+                "state": db.get("state", "READY"),
+                "tableCount": len(tables),
+            }
+        )
     return result
 
 
 @app.get("/api/spanner/tables")
 async def api_spanner_tables(instance: str = Query(...), database: str = Query(...)):
     from cloudbox.services.spanner.engine import get_engine
+
     engine = get_engine()
     tables = engine.list_tables(settings.default_project, instance, database)
     return [{"tableName": t} for t in sorted(tables)]
@@ -602,6 +656,7 @@ async def api_spanner_tables(instance: str = Query(...), database: str = Query(.
 @app.delete("/api/spanner/databases")
 async def api_spanner_delete_database(instance: str = Query(...), database: str = Query(...)):
     from cloudbox.services.spanner.engine import get_engine
+
     engine = get_engine()
     found = engine.delete_database(settings.default_project, instance, database)
     if not found:
@@ -611,9 +666,11 @@ async def api_spanner_delete_database(instance: str = Query(...), database: str 
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
+
 @app.get("/api/scheduler/jobs")
 async def api_sched_jobs():
     from cloudbox.services.scheduler.store import get_store
+
     store = get_store()
     jobs = store.list("jobs")
     return sorted(jobs, key=lambda x: x.get("name", ""))
@@ -621,17 +678,16 @@ async def api_sched_jobs():
 
 @app.post("/api/scheduler/jobs/{job_id}:run")
 async def api_sched_run(job_id: str):
-    import httpx
     from cloudbox.services.scheduler.store import get_store
     from cloudbox.services.scheduler.worker import _dispatch
+
     store = get_store()
-    job = next(
-        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
-    )
+    job = next((j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None)
     if job is None:
         return JSONResponse(status_code=404, content={"error": "Job not found"})
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from datetime import datetime
+
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         await _dispatch(job)
         job["lastAttemptTime"] = now
@@ -646,10 +702,9 @@ async def api_sched_run(job_id: str):
 @app.post("/api/scheduler/jobs/{job_id}:pause")
 async def api_sched_pause(job_id: str):
     from cloudbox.services.scheduler.store import get_store
+
     store = get_store()
-    job = next(
-        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
-    )
+    job = next((j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None)
     if job is None:
         return JSONResponse(status_code=404, content={"error": "Job not found"})
     job["state"] = "PAUSED"
@@ -660,10 +715,9 @@ async def api_sched_pause(job_id: str):
 @app.post("/api/scheduler/jobs/{job_id}:resume")
 async def api_sched_resume(job_id: str):
     from cloudbox.services.scheduler.store import get_store
+
     store = get_store()
-    job = next(
-        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
-    )
+    job = next((j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None)
     if job is None:
         return JSONResponse(status_code=404, content={"error": "Job not found"})
     job["state"] = "ENABLED"
@@ -674,10 +728,9 @@ async def api_sched_resume(job_id: str):
 @app.delete("/api/scheduler/jobs/{job_id}")
 async def api_sched_delete(job_id: str):
     from cloudbox.services.scheduler.store import get_store
+
     store = get_store()
-    job = next(
-        (j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None
-    )
+    job = next((j for j in store.list("jobs") if j.get("name", "").endswith(f"/{job_id}")), None)
     if job is None:
         return JSONResponse(status_code=404, content={"error": "Job not found"})
     store.delete("jobs", job["name"])
@@ -697,7 +750,17 @@ async def reset_service(service: str):
 
 @app.post("/reset")
 async def reset_all():
-    for svc in ("gcs", "pubsub", "firestore", "secretmanager", "tasks", "bigquery", "spanner", "logging", "scheduler"):
+    for svc in (
+        "gcs",
+        "pubsub",
+        "firestore",
+        "secretmanager",
+        "tasks",
+        "bigquery",
+        "spanner",
+        "logging",
+        "scheduler",
+    ):
         _reset_one(svc)
     return {"reset": "all"}
 
@@ -705,32 +768,41 @@ async def reset_all():
 def _reset_one(service: str) -> None:
     if service == "gcs":
         from cloudbox.services.gcs.store import get_store
+
         get_store().reset()
     elif service == "pubsub":
-        from cloudbox.services.pubsub.store import get_store, _queues, _unacked
+        from cloudbox.services.pubsub.store import _queues, _unacked, get_store
+
         get_store().reset()
         _queues.clear()
         _unacked.clear()
     elif service == "firestore":
         from cloudbox.services.firestore.store import get_store
+
         get_store().reset()
     elif service == "secretmanager":
         from cloudbox.services.secretmanager.store import get_store
+
         get_store().reset()
     elif service == "tasks":
         from cloudbox.services.tasks.store import get_store
+
         get_store().reset()
     elif service == "bigquery":
         from cloudbox.services.bigquery.engine import get_engine
+
         get_engine().reset()
     elif service == "spanner":
         from cloudbox.services.spanner.engine import get_engine
+
         get_engine().reset()
     elif service == "logging":
         from cloudbox.services.logging.store import get_store
+
         get_store().reset()
     elif service == "scheduler":
         from cloudbox.services.scheduler.store import get_store
+
         get_store().reset()
 
 

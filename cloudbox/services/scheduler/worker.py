@@ -10,12 +10,13 @@ Retry logic:
   (total wall-clock time from the first failure). Retry state is stored as
   ephemeral _retry* fields on the job dict.
 """
+
 from __future__ import annotations
 
 import asyncio
 import base64
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from croniter import croniter
@@ -28,7 +29,7 @@ _POLL_INTERVAL = 30  # seconds
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_dt(s: str) -> datetime | None:
@@ -37,7 +38,7 @@ def _parse_dt(s: str) -> datetime | None:
     try:
         s = s.rstrip("Z")
         dt = datetime.fromisoformat(s)
-        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+        return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
     except Exception:
         return None
 
@@ -49,6 +50,7 @@ def _parse_duration_s(s: str) -> float:
         return 0.0
     total = 0.0
     import re
+
     for value, unit in re.findall(r"(\d+(?:\.\d+)?)([smh])", s):
         v = float(value)
         if unit == "s":
@@ -66,7 +68,7 @@ def _retry_backoff(retry_config: dict, attempt: int) -> float:
     max_b = _parse_duration_s(retry_config.get("maxBackoffDuration", "3600s"))
     doublings = int(retry_config.get("maxDoublings", 5))
     exponent = min(attempt - 1, doublings)
-    return min(min_b * (2 ** exponent), max_b)
+    return min(min_b * (2**exponent), max_b)
 
 
 def _is_due(schedule: str, last_attempt: str, now: datetime) -> bool:
@@ -76,7 +78,7 @@ def _is_due(schedule: str, last_attempt: str, now: datetime) -> bool:
         if last is None:
             return True  # Never run — fire immediately on first poll
         cron = croniter(schedule, last)
-        next_run = cron.get_next(datetime).replace(tzinfo=timezone.utc)
+        next_run = cron.get_next(datetime).replace(tzinfo=UTC)
         return next_run <= now
     except Exception:
         logger.warning("Invalid cron schedule '%s'", schedule)
@@ -87,7 +89,7 @@ def _next_run_time(schedule: str, base: datetime) -> str:
     """Return ISO string of the next scheduled time after base."""
     try:
         cron = croniter(schedule, base)
-        nxt = cron.get_next(datetime).replace(tzinfo=timezone.utc)
+        nxt = cron.get_next(datetime).replace(tzinfo=UTC)
         return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
     except Exception:
         return ""
@@ -148,7 +150,9 @@ async def _tick(client: httpx.AsyncClient) -> None:
             job["status"] = {}
             _clear_retry_state(job)
         except Exception as exc:
-            logger.warning("Job %s dispatch failed (attempt %d): %s", job_name, retry_attempt + 1, exc)
+            logger.warning(
+                "Job %s dispatch failed (attempt %d): %s", job_name, retry_attempt + 1, exc
+            )
             job["status"] = {"code": 2, "message": str(exc)}
             _schedule_retry(job, retry_attempt, now)
 

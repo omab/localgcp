@@ -13,6 +13,7 @@ Jobs:       insert (query), get
 Queries:    getQueryResults (/queries/{jobId}), synchronous query (/queries)
 Tabledata:  insertAll (streaming insert), list (read rows)
 """
+
 from __future__ import annotations
 
 import uuid
@@ -47,7 +48,7 @@ async def create_dataset(project: str, request: Request):
     try:
         return _engine().create_dataset(project, dataset_id, body)
     except ValueError as e:
-        raise GCPError(409, str(e))
+        raise GCPError(409, str(e)) from e
 
 
 @app.get("/bigquery/v2/projects/{project}/datasets/{dataset_id}")
@@ -84,7 +85,7 @@ async def delete_dataset(
     try:
         found = _engine().delete_dataset(project, dataset_id, delete_contents=deleteContents)
     except ValueError as e:
-        raise GCPError(400, str(e))
+        raise GCPError(400, str(e)) from e
     if not found:
         raise GCPError(404, f"Dataset {project}:{dataset_id} not found")
     return Response(status_code=204)
@@ -109,7 +110,7 @@ async def create_table(project: str, dataset_id: str, request: Request):
     except ValueError as e:
         msg = str(e)
         status = 409 if "Already exists" in msg else 400
-        raise GCPError(status, msg)
+        raise GCPError(status, msg) from e
 
 
 @app.patch("/bigquery/v2/projects/{project}/datasets/{dataset_id}/tables/{table_id}")
@@ -123,7 +124,7 @@ async def update_table(project: str, dataset_id: str, table_id: str, request: Re
     except ValueError as e:
         msg = str(e)
         status = 404 if "Not found" in msg else 400
-        raise GCPError(status, msg)
+        raise GCPError(status, msg) from e
 
 
 @app.get("/bigquery/v2/projects/{project}/datasets/{dataset_id}/tables/{table_id}")
@@ -184,7 +185,9 @@ async def insert_job(project: str, request: Request):
     parameter_mode = query_cfg.get("parameterMode", "NONE")
 
     job = _engine().run_query(
-        project, job_id, sql,
+        project,
+        job_id,
+        sql,
         use_legacy_sql=use_legacy,
         query_parameters=query_parameters,
         parameter_mode=parameter_mode,
@@ -207,7 +210,10 @@ async def cancel_job(project: str, job_id: str):
     job = _engine().get_job(project, job_id)
     if job is None:
         raise GCPError(404, f"Job {project}:{job_id} not found")
-    return {"kind": "bigquery#jobCancelResponse", "job": {k: v for k, v in job.items() if not k.startswith("_")}}
+    return {
+        "kind": "bigquery#jobCancelResponse",
+        "job": {k: v for k, v in job.items() if not k.startswith("_")},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +247,9 @@ async def sync_query(project: str, request: Request):
     query_parameters = body.get("queryParameters") or []
     parameter_mode = body.get("parameterMode", "NONE")
     job = _engine().run_query(
-        project, job_id, sql,
+        project,
+        job_id,
+        sql,
         use_legacy_sql=use_legacy,
         query_parameters=query_parameters,
         parameter_mode=parameter_mode,
@@ -284,16 +292,14 @@ async def insert_all(project: str, dataset_id: str, table_id: str, request: Requ
     try:
         insert_errors = _engine().insert_rows(project, dataset_id, table_id, rows)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return {
         "kind": "bigquery#tableDataInsertAllResponse",
         "insertErrors": insert_errors,
     }
 
 
-@app.get(
-    "/bigquery/v2/projects/{project}/datasets/{dataset_id}/tables/{table_id}/data"
-)
+@app.get("/bigquery/v2/projects/{project}/datasets/{dataset_id}/tables/{table_id}/data")
 async def list_tabledata(
     project: str,
     dataset_id: str,
@@ -303,10 +309,12 @@ async def list_tabledata(
 ):
     try:
         result = _engine().list_rows(
-            project, dataset_id, table_id,
+            project,
+            dataset_id,
+            table_id,
             max_results=maxResults,
             page_token=pageToken,
         )
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return result

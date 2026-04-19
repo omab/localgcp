@@ -2,9 +2,10 @@
 
 Implements the Secret Manager REST API v1 used by google-cloud-secret-manager.
 """
+
 from __future__ import annotations
 
-from fastapi import FastAPI, Query, Request, Response
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from cloudbox.core.errors import GCPError, add_gcp_exception_handler
@@ -33,10 +34,7 @@ def _store():
 def _version_number(secret_name: str) -> int:
     """Return the next version number for a secret."""
     store = _store()
-    existing = [
-        k for k in store.keys("versions")
-        if k.startswith(f"{secret_name}/versions/")
-    ]
+    existing = [k for k in store.keys("versions") if k.startswith(f"{secret_name}/versions/")]
     nums = []
     for k in existing:
         try:
@@ -50,10 +48,7 @@ def _resolve_version(secret_name: str, version_id: str) -> str | None:
     """Resolve 'latest' or a numeric version to the canonical version key."""
     store = _store()
     if version_id == "latest":
-        candidates = [
-            k for k in store.keys("versions")
-            if k.startswith(f"{secret_name}/versions/")
-        ]
+        candidates = [k for k in store.keys("versions") if k.startswith(f"{secret_name}/versions/")]
         enabled = []
         for k in candidates:
             v = store.get("versions", k)
@@ -106,7 +101,7 @@ async def list_secrets(
     all_secrets = [SecretModel(**v) for v in store.list("secrets") if v["name"].startswith(prefix)]
     all_secrets.sort(key=lambda s: s.name)
     offset = int(pageToken) if pageToken else 0
-    page = all_secrets[offset: offset + pageSize]
+    page = all_secrets[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(all_secrets) else None
     return ListSecretsResponse(
         secrets=page, nextPageToken=next_token, totalSize=len(all_secrets)
@@ -200,7 +195,7 @@ async def list_versions(
         all_versions = [v for v in all_versions if v.state == state_filter]
 
     offset = int(pageToken) if pageToken else 0
-    page = all_versions[offset: offset + pageSize]
+    page = all_versions[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(all_versions) else None
 
     return ListSecretVersionsResponse(

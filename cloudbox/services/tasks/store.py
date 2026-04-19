@@ -4,6 +4,7 @@ Namespaces:
   queues  → queue_name  → QueueModel dict
   tasks   → task_name   → TaskModel dict
 """
+
 from cloudbox.config import settings
 from cloudbox.core.store import NamespacedStore
 

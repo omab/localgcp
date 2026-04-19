@@ -12,6 +12,7 @@ Supports the subset of the GCP CEL-based filter syntax used in practice:
 Evaluation is case-sensitive and short-circuits AND/OR.
 An empty filter string matches all messages.
 """
+
 from __future__ import annotations
 
 import re
@@ -87,7 +88,7 @@ class _Parser:
             return self._parse_has_prefix()
         # attributes.KEY = "VALUE"
         if tok and tok.startswith("attributes."):
-            key = self._consume()[len("attributes."):]
+            key = self._consume()[len("attributes.") :]
             op = self._consume()
             if op != "=":
                 raise ValueError(f"Unsupported operator: {op!r}")
@@ -101,7 +102,7 @@ class _Parser:
         attr = self._consume()
         if not attr.startswith("attributes."):
             raise ValueError(f"hasPrefix first arg must be attributes.KEY, got {attr!r}")
-        key = attr[len("attributes."):]
+        key = attr[len("attributes.") :]
         self._expect(",")
         prefix = self._consume()
         self._expect(")")

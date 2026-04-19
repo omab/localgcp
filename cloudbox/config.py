@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
 import os
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -12,14 +12,10 @@ class Settings:
     )
 
     # Persistence: set to a directory path to enable JSON file persistence
-    data_dir: str | None = field(
-        default_factory=lambda: os.environ.get("CLOUDBOX_DATA_DIR")
-    )
+    data_dir: str | None = field(default_factory=lambda: os.environ.get("CLOUDBOX_DATA_DIR"))
 
     # Service ports
-    gcs_port: int = field(
-        default_factory=lambda: int(os.environ.get("CLOUDBOX_GCS_PORT", "4443"))
-    )
+    gcs_port: int = field(default_factory=lambda: int(os.environ.get("CLOUDBOX_GCS_PORT", "4443")))
     # pubsub_port is the gRPC port — compatible with PUBSUB_EMULATOR_HOST
     pubsub_port: int = field(
         default_factory=lambda: int(os.environ.get("CLOUDBOX_PUBSUB_PORT", "8085"))
@@ -53,9 +49,7 @@ class Settings:
         default_factory=lambda: int(os.environ.get("CLOUDBOX_ADMIN_PORT", "8888"))
     )
 
-    host: str = field(
-        default_factory=lambda: os.environ.get("CLOUDBOX_HOST", "0.0.0.0")
-    )
+    host: str = field(default_factory=lambda: os.environ.get("CLOUDBOX_HOST", "0.0.0.0"))
 
 
 settings = Settings()

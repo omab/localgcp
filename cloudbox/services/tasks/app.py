@@ -2,15 +2,14 @@
 
 Implements the Cloud Tasks REST API v2 used by google-cloud-tasks.
 """
+
 from __future__ import annotations
 
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
-from fastapi import FastAPI, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, Request
 
 from cloudbox.core.errors import GCPError, add_gcp_exception_handler
 from cloudbox.core.middleware import add_request_logging
@@ -56,7 +55,9 @@ def _store():
 @app.post("/v2/projects/{project}/locations/{location}/queues")
 async def create_queue(project: str, location: str, request: Request):
     body = await request.json()
-    name = body.get("name") or f"projects/{project}/locations/{location}/queues/{uuid.uuid4().hex[:8]}"
+    name = (
+        body.get("name") or f"projects/{project}/locations/{location}/queues/{uuid.uuid4().hex[:8]}"
+    )
     store = _store()
     if store.exists("queues", name):
         raise GCPError(409, f"Queue {name} already exists.")
@@ -77,7 +78,7 @@ async def list_queues(
     all_queues = [QueueModel(**v) for v in store.list("queues") if v["name"].startswith(prefix)]
     all_queues.sort(key=lambda q: q.name)
     offset = int(pageToken) if pageToken else 0
-    page = all_queues[offset: offset + pageSize]
+    page = all_queues[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(all_queues) else None
     return ListQueuesResponse(queues=page, nextPageToken=next_token).model_dump(exclude_none=True)
 
@@ -202,7 +203,7 @@ async def list_tasks(
     all_tasks.sort(key=lambda t: t.scheduleTime)
 
     offset = int(pageToken) if pageToken else 0
-    page = all_tasks[offset: offset + pageSize]
+    page = all_tasks[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(all_tasks) else None
     return ListTasksResponse(tasks=page, nextPageToken=next_token).model_dump(exclude_none=True)
 
@@ -217,7 +218,9 @@ async def get_task(project: str, location: str, queue_id: str, task_id: str):
     return data
 
 
-@app.delete("/v2/projects/{project}/locations/{location}/queues/{queue_id}/tasks/{task_id}", status_code=200)
+@app.delete(
+    "/v2/projects/{project}/locations/{location}/queues/{queue_id}/tasks/{task_id}", status_code=200
+)
 async def delete_task(project: str, location: str, queue_id: str, task_id: str):
     task_name = f"projects/{project}/locations/{location}/queues/{queue_id}/tasks/{task_id}"
     store = _store()

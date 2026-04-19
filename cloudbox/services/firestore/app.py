@@ -12,10 +12,11 @@ Examples:
   .../documents/users/alice/posts → sub-collection      (list)
   .../documents/users/alice/posts/p1 → sub-document     (get/update/delete)
 """
+
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -23,7 +24,6 @@ from fastapi.responses import JSONResponse
 from cloudbox.core.errors import GCPError, add_gcp_exception_handler
 from cloudbox.core.middleware import add_request_logging
 from cloudbox.services.firestore.models import (
-    AggregationConfig,
     BatchGetRequest,
     BatchWriteRequest,
     BatchWriteResponse,
@@ -46,7 +46,7 @@ add_request_logging(app, "firestore")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _store():
@@ -66,7 +66,7 @@ def _parse_path(full_path: str) -> tuple[str, str, str, list[str]]:
     project = parts[1] if len(parts) > 1 else ""
     database = parts[3] if len(parts) > 3 else ""
     doc_root = "/".join(parts[:5])  # projects/P/databases/D/documents
-    trailing = parts[5:]           # [col, doc, ...]
+    trailing = parts[5:]  # [col, doc, ...]
     return project, database, doc_root, trailing
 
 
@@ -109,8 +109,9 @@ async def _run_query_impl(parent: str, body: RunQueryRequest):
         else:
             prefix = f"{parent}/{collection_id}/"
             candidates = [
-                v for v in store.list("documents")
-                if v["name"].startswith(prefix) and "/" not in v["name"][len(prefix):]
+                v
+                for v in store.list("documents")
+                if v["name"].startswith(prefix) and "/" not in v["name"][len(prefix) :]
             ]
 
         sq_dict = sq.model_dump(by_alias=True, exclude_none=True)
@@ -159,8 +160,9 @@ async def _run_aggregation_query_impl(parent: str, body: RunAggregationQueryRequ
             else:
                 prefix = f"{parent}/{collection_id}/"
                 coll = [
-                    v for v in store.list("documents")
-                    if v["name"].startswith(prefix) and "/" not in v["name"][len(prefix):]
+                    v
+                    for v in store.list("documents")
+                    if v["name"].startswith(prefix) and "/" not in v["name"][len(prefix) :]
                 ]
             candidates.extend(coll)
 
@@ -214,10 +216,14 @@ async def _run_aggregation_query_impl(parent: str, body: RunAggregationQueryRequ
             else:
                 aggregate_fields[alias] = {"nullValue": "NULL_VALUE"}
 
-    return JSONResponse(content=[{
-        "result": {"aggregateFields": aggregate_fields},
-        "readTime": now,
-    }])
+    return JSONResponse(
+        content=[
+            {
+                "result": {"aggregateFields": aggregate_fields},
+                "readTime": now,
+            }
+        ]
+    )
 
 
 @app.post("/v1/projects/{project}/databases/{database}/documents:batchGet")
@@ -237,6 +243,7 @@ async def batch_get(project: str, database: str, body: BatchGetRequest):
 @app.post("/v1/projects/{project}/databases/{database}:beginTransaction")
 async def begin_transaction(project: str, database: str):
     import base64
+
     txn_id = uuid.uuid4().bytes
     return {"transaction": base64.b64encode(txn_id).decode()}
 
@@ -282,12 +289,18 @@ def _apply_transforms(fields: dict, transforms: list[FieldTransform], now: str) 
                 if existing and "doubleValue" in existing:
                     _set_field(fields, parts, {"doubleValue": existing["doubleValue"] + delta})
                 else:
-                    base = int(existing["integerValue"]) if existing and "integerValue" in existing else 0
+                    base = (
+                        int(existing["integerValue"])
+                        if existing and "integerValue" in existing
+                        else 0
+                    )
                     _set_field(fields, parts, {"integerValue": str(base + delta)})
             elif "doubleValue" in t.increment:
                 delta = float(t.increment["doubleValue"])
                 if existing and "integerValue" in existing:
-                    _set_field(fields, parts, {"doubleValue": int(existing["integerValue"]) + delta})
+                    _set_field(
+                        fields, parts, {"doubleValue": int(existing["integerValue"]) + delta}
+                    )
                 elif existing and "doubleValue" in existing:
                     _set_field(fields, parts, {"doubleValue": existing["doubleValue"] + delta})
                 else:
@@ -474,12 +487,13 @@ async def get_or_list(
         collection_id = parts[-1]
         prefix = f"{parent}/{collection_id}/"
         all_docs = [
-            v for v in store.list("documents")
-            if v["name"].startswith(prefix) and "/" not in v["name"][len(prefix):]
+            v
+            for v in store.list("documents")
+            if v["name"].startswith(prefix) and "/" not in v["name"][len(prefix) :]
         ]
         all_docs.sort(key=lambda d: d["name"])
         offset = int(pageToken) if pageToken else 0
-        page = all_docs[offset: offset + pageSize]
+        page = all_docs[offset : offset + pageSize]
         next_token = str(offset + pageSize) if offset + pageSize < len(all_docs) else None
         return ListDocumentsResponse(
             documents=[Document(**d) for d in page],
@@ -517,7 +531,9 @@ async def update_document(project: str, database: str, doc_path: str, request: R
     return doc
 
 
-@app.delete("/v1/projects/{project}/databases/{database}/documents/{doc_path:path}", status_code=204)
+@app.delete(
+    "/v1/projects/{project}/databases/{database}/documents/{doc_path:path}", status_code=204
+)
 async def delete_document(project: str, database: str, doc_path: str):
     doc_root = f"projects/{project}/databases/{database}/documents"
     name = f"{doc_root}/{doc_path}"

@@ -1,8 +1,10 @@
 """Pydantic models for Pub/Sub REST API."""
+
 from __future__ import annotations
 
 import json
 from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -15,6 +17,7 @@ class SchemaSettings(BaseModel):
 
 class CreateTopicBody(BaseModel):
     """Request body for PUT /v1/projects/{project}/topics/{topic_id}."""
+
     labels: dict[str, str] = Field(default_factory=dict)
     messageRetentionDuration: str = "604800s"
     schemaSettings: SchemaSettings | None = None
@@ -28,14 +31,14 @@ class TopicModel(BaseModel):
 
 
 class BigQueryConfig(BaseModel):
-    table: str = ""                 # "project:dataset.table" or "project.dataset.table"
-    useTopicSchema: bool = False    # decode message JSON and map to table columns
-    writeMetadata: bool = False     # add subscription_name / message_id / publish_time / attributes
-    dropUnknownFields: bool = False # silently drop columns not in the table schema
+    table: str = ""  # "project:dataset.table" or "project.dataset.table"
+    useTopicSchema: bool = False  # decode message JSON and map to table columns
+    writeMetadata: bool = False  # add subscription_name / message_id / publish_time / attributes
+    dropUnknownFields: bool = False  # silently drop columns not in the table schema
 
 
 class CloudStorageAvroConfig(BaseModel):
-    writeMetadata: bool = False     # include subscription / message metadata fields
+    writeMetadata: bool = False  # include subscription / message metadata fields
 
 
 class CloudStorageConfig(BaseModel):
@@ -59,7 +62,7 @@ class DeadLetterPolicy(BaseModel):
 
 
 class RetryPolicy(BaseModel):
-    minimumBackoff: str = "10s"   # e.g. "10s"
+    minimumBackoff: str = "10s"  # e.g. "10s"
     maximumBackoff: str = "600s"  # e.g. "600s"
 
 
@@ -80,7 +83,7 @@ class SubscriptionModel(BaseModel):
 
 
 class PubsubMessage(BaseModel):
-    data: str = ""          # base64-encoded
+    data: str = ""  # base64-encoded
     attributes: dict[str, str] = Field(default_factory=dict)
     messageId: str = ""
     publishTime: str = ""
@@ -148,13 +151,14 @@ class CreateSnapshotRequest(BaseModel):
 
 
 class SeekRequest(BaseModel):
-    time: str = ""        # RFC3339; seek to this point in time
-    snapshot: str = ""    # full snapshot resource name
+    time: str = ""  # RFC3339; seek to this point in time
+    snapshot: str = ""  # full snapshot resource name
 
 
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
+
 
 class SchemaModel(BaseModel):
     name: str
@@ -178,9 +182,9 @@ class ValidateSchemaRequest(BaseModel):
 class ValidateMessageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    name: str = ""          # schema resource name (alternative to inline schema)
+    name: str = ""  # schema resource name (alternative to inline schema)
     schema_: SchemaModel | None = Field(None, alias="schema")
-    message: str = ""       # base64-encoded bytes
+    message: str = ""  # base64-encoded bytes
     encoding: str = "ENCODING_UNSPECIFIED"
 
 
@@ -193,6 +197,7 @@ def validate_schema_definition(schema_type: str, definition: str) -> str | None:
             return f"Invalid Avro schema JSON: {e}"
         try:
             import fastavro.schema  # type: ignore[import]
+
             fastavro.schema.parse_schema(json.loads(definition))
         except ImportError:
             pass
@@ -216,9 +221,11 @@ def validate_message_against_schema(
             except Exception as e:
                 return f"Message is not valid JSON: {e}"
             try:
-                import fastavro.io.parsing  # type: ignore[import]
-                import fastavro
                 import io
+
+                import fastavro
+                import fastavro.io.parsing  # type: ignore[import]
+
                 parsed = fastavro.schema.parse_schema(json.loads(definition))
                 reader = io.BytesIO(message_bytes)
                 fastavro.schemaless_reader(reader, parsed)
@@ -229,8 +236,10 @@ def validate_message_against_schema(
         # BINARY: need fastavro to decode; skip if not available
         elif encoding == "BINARY":
             try:
-                import fastavro
                 import io
+
+                import fastavro
+
                 parsed = fastavro.schema.parse_schema(json.loads(definition))
                 reader = io.BytesIO(message_bytes)
                 fastavro.schemaless_reader(reader, parsed)

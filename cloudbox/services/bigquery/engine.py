@@ -8,12 +8,12 @@ SQL rewriting: BigQuery uses backtick-quoted, project-qualified names
 (`project.dataset.table`). _rewrite_sql() converts these to DuckDB-
 compatible double-quoted identifiers ("dataset"."table").
 """
+
 from __future__ import annotations
 
 import re
 import threading
-import uuid
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +104,7 @@ def _serialize_value(v: Any) -> Any:
 
 
 def _now_ms() -> str:
-    return str(int(datetime.now(timezone.utc).timestamp() * 1000))
+    return str(int(datetime.now(UTC).timestamp() * 1000))
 
 
 # ------------------------------------------------------------------
@@ -114,6 +114,7 @@ def _now_ms() -> str:
 # ------------------------------------------------------------------
 # Query parameter helpers
 # ------------------------------------------------------------------
+
 
 def _bq_scalar_value(type_name: str, value: str) -> Any:
     t = type_name.upper()
@@ -125,6 +126,7 @@ def _bq_scalar_value(type_name: str, value: str) -> Any:
         return value.lower() in ("true", "1")
     if t == "BYTES":
         import base64 as _b64
+
         return _b64.b64decode(value) if value else b""
     return value  # STRING, TIMESTAMP, DATE, TIME, DATETIME, JSON
 
@@ -136,7 +138,9 @@ def _bq_param_value(param: dict) -> Any:
     type_name = ptype.get("type", "STRING").upper()
     if type_name == "ARRAY":
         item_type = ptype.get("arrayType", {}).get("type", "STRING")
-        return [_bq_scalar_value(item_type, v.get("value", "")) for v in pval.get("arrayValues", [])]
+        return [
+            _bq_scalar_value(item_type, v.get("value", "")) for v in pval.get("arrayValues", [])
+        ]
     return _bq_scalar_value(type_name, pval.get("value", ""))
 
 
@@ -179,8 +183,13 @@ def _is_select(sql: str) -> bool:
 
 
 _INFORMATION_SCHEMA_VIEWS = {
-    "TABLES", "COLUMNS", "SCHEMATA", "VIEWS",
-    "TABLE_OPTIONS", "COLUMN_FIELD_PATHS", "PARTITIONS",
+    "TABLES",
+    "COLUMNS",
+    "SCHEMATA",
+    "VIEWS",
+    "TABLE_OPTIONS",
+    "COLUMN_FIELD_PATHS",
+    "PARTITIONS",
 }
 
 # Map BQ INFORMATION_SCHEMA view names to DuckDB information_schema equivalents.
@@ -190,7 +199,7 @@ _IS_VIEW_MAP: dict[str, str] = {
     "COLUMNS": "columns",
     "SCHEMATA": "schemata",
     "VIEWS": "views",
-    "TABLE_OPTIONS": "tables",   # best-effort fallback
+    "TABLE_OPTIONS": "tables",  # best-effort fallback
 }
 
 
@@ -203,6 +212,7 @@ def _rewrite_information_schema(sql: str) -> str:
       project.dataset.INFORMATION_SCHEMA.TABLES  (unquoted)
       INFORMATION_SCHEMA.TABLES
     """
+
     def _replacement(m: re.Match) -> str:
         view = m.group("view").upper()
         duck_view = _IS_VIEW_MAP.get(view, view.lower())
@@ -210,14 +220,14 @@ def _rewrite_information_schema(sql: str) -> str:
 
     # Backtick forms: `anything.INFORMATION_SCHEMA.VIEW`
     sql = re.sub(
-        r'`[^`]*\bINFORMATION_SCHEMA\b\.(?P<view>\w+)`',
+        r"`[^`]*\bINFORMATION_SCHEMA\b\.(?P<view>\w+)`",
         _replacement,
         sql,
         flags=re.IGNORECASE,
     )
     # Unquoted dotted forms: word.INFORMATION_SCHEMA.VIEW or just INFORMATION_SCHEMA.VIEW
     sql = re.sub(
-        r'\b(?:\w+\.)*INFORMATION_SCHEMA\.(?P<view>\w+)\b',
+        r"\b(?:\w+\.)*INFORMATION_SCHEMA\.(?P<view>\w+)\b",
         _replacement,
         sql,
         flags=re.IGNORECASE,
@@ -237,24 +247,25 @@ def _rewrite_sql(sql: str, project: str) -> str:
     sql = _rewrite_information_schema(sql)
     # 3-part backtick: `project.dataset.table`
     sql = re.sub(
-        r'`[^`]*\.([^`.\s]+)\.([^`.\s]+)`',
+        r"`[^`]*\.([^`.\s]+)\.([^`.\s]+)`",
         lambda m: f'"{m.group(1)}"."{m.group(2)}"',
         sql,
     )
     # 2-part backtick: `dataset.table`
     sql = re.sub(
-        r'`([^`.\s]+)\.([^`.\s]+)`',
+        r"`([^`.\s]+)\.([^`.\s]+)`",
         lambda m: f'"{m.group(1)}"."{m.group(2)}"',
         sql,
     )
     # Single backtick identifier: `name`
-    sql = re.sub(r'`([^`]+)`', lambda m: f'"{m.group(1)}"', sql)
+    sql = re.sub(r"`([^`]+)`", lambda m: f'"{m.group(1)}"', sql)
     return sql
 
 
 # ------------------------------------------------------------------
 # Engine
 # ------------------------------------------------------------------
+
 
 class BigQueryEngine:
     """Single DuckDB connection backing the BigQuery emulator."""
@@ -289,8 +300,7 @@ class BigQueryEngine:
             desc = self._conn.description or []
             rows = self._conn.fetchall()
         columns = [
-            (d[0], _duck_type_to_bq(str(d[1])) if d[1] is not None else "STRING")
-            for d in desc
+            (d[0], _duck_type_to_bq(str(d[1])) if d[1] is not None else "STRING") for d in desc
         ]
         return columns, rows
 
@@ -333,9 +343,7 @@ class BigQueryEngine:
         prefix = f"{project}."
         return [v for k, v in self._datasets.items() if k.startswith(prefix)]
 
-    def delete_dataset(
-        self, project: str, dataset_id: str, delete_contents: bool = False
-    ) -> bool:
+    def delete_dataset(self, project: str, dataset_id: str, delete_contents: bool = False) -> bool:
         key = f"{project}.{dataset_id}"
         if key not in self._datasets:
             return False
@@ -357,9 +365,7 @@ class BigQueryEngine:
     # Tables
     # ------------------------------------------------------------------
 
-    def create_table(
-        self, project: str, dataset_id: str, table_id: str, body: dict
-    ) -> dict:
+    def create_table(self, project: str, dataset_id: str, table_id: str, body: dict) -> dict:
         ds_key = f"{project}.{dataset_id}"
         if ds_key not in self._datasets:
             raise ValueError(f"Dataset not found: {dataset_id}")
@@ -397,9 +403,7 @@ class BigQueryEngine:
         self._tables[tbl_key] = meta
         return meta
 
-    def update_table(
-        self, project: str, dataset_id: str, table_id: str, body: dict
-    ) -> dict:
+    def update_table(self, project: str, dataset_id: str, table_id: str, body: dict) -> dict:
         tbl_key = f"{project}.{dataset_id}.{table_id}"
         meta = self._tables.get(tbl_key)
         if meta is None:
@@ -445,9 +449,7 @@ class BigQueryEngine:
         del self._tables[key]
         return True
 
-    def create_view(
-        self, project: str, dataset_id: str, table_id: str, body: dict
-    ) -> dict:
+    def create_view(self, project: str, dataset_id: str, table_id: str, body: dict) -> dict:
         ds_key = f"{project}.{dataset_id}"
         if ds_key not in self._datasets:
             raise ValueError(f"Dataset not found: {dataset_id}")
@@ -484,9 +486,7 @@ class BigQueryEngine:
         self._tables[tbl_key] = meta
         return meta
 
-    def update_view(
-        self, project: str, dataset_id: str, table_id: str, body: dict
-    ) -> dict:
+    def update_view(self, project: str, dataset_id: str, table_id: str, body: dict) -> dict:
         tbl_key = f"{project}.{dataset_id}.{table_id}"
         meta = self._tables.get(tbl_key)
         if meta is None:
@@ -537,13 +537,9 @@ class BigQueryEngine:
             if _is_select(rewritten):
                 columns, rows = self._select(rewritten, duck_params)
                 schema_fields = [
-                    {"name": name, "type": bq_type, "mode": "NULLABLE"}
-                    for name, bq_type in columns
+                    {"name": name, "type": bq_type, "mode": "NULLABLE"} for name, bq_type in columns
                 ]
-                bq_rows = [
-                    {"f": [{"v": _serialize_value(v)} for v in row]}
-                    for row in rows
-                ]
+                bq_rows = [{"f": [{"v": _serialize_value(v)} for v in row]} for row in rows]
                 num_dml_rows = None
             else:
                 # DML (INSERT/UPDATE/DELETE) or DDL (CREATE/DROP/ALTER)
@@ -672,16 +668,13 @@ class BigQueryEngine:
                     vals = list(json_row.values())
                 placeholders = ", ".join("?" for _ in vals)
                 self._exec(
-                    f'INSERT INTO "{dataset_id}"."{table_id}" ({col_names}) VALUES ({placeholders})',
+                    f'INSERT INTO "{dataset_id}"."{table_id}"'
+                    f" ({col_names}) VALUES ({placeholders})",
                     vals,
                 )
-                self._tables[tbl_key]["numRows"] = str(
-                    int(self._tables[tbl_key]["numRows"]) + 1
-                )
+                self._tables[tbl_key]["numRows"] = str(int(self._tables[tbl_key]["numRows"]) + 1)
             except Exception as exc:
-                errors.append(
-                    {"index": i, "errors": [{"reason": "invalid", "message": str(exc)}]}
-                )
+                errors.append({"index": i, "errors": [{"reason": "invalid", "message": str(exc)}]})
 
         return errors
 
@@ -703,13 +696,9 @@ class BigQueryEngine:
             [max_results, offset],
         )
         schema_fields = [
-            {"name": name, "type": bq_type, "mode": "NULLABLE"}
-            for name, bq_type in columns
+            {"name": name, "type": bq_type, "mode": "NULLABLE"} for name, bq_type in columns
         ]
-        bq_rows = [
-            {"f": [{"v": _serialize_value(v)} for v in row]}
-            for row in rows
-        ]
+        bq_rows = [{"f": [{"v": _serialize_value(v)} for v in row]} for row in rows]
         total = int(self._tables[tbl_key].get("numRows", "0"))
         next_token = str(offset + max_results) if offset + max_results < total else None
         return {

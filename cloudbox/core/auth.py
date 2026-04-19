@@ -3,7 +3,9 @@
 Accepts any Bearer token (or no token). Injects the configured project ID
 so route handlers don't need to parse it from the Authorization header.
 """
+
 from fastapi import Request
+
 from cloudbox.config import settings
 
 

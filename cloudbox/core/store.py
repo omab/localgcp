@@ -4,6 +4,7 @@ Each service creates its own NamespacedStore instance. The store is a
 dict-of-dicts: namespace → key → value, where values are plain dicts
 that can be serialized to JSON.
 """
+
 import json
 import threading
 from pathlib import Path

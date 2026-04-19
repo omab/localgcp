@@ -5,6 +5,7 @@ Implements the Pub/Sub REST API v1 used by google-cloud-pubsub.
 Route design: use concrete path patterns (topics vs subscriptions) instead
 of catch-alls so FastAPI can route correctly.
 """
+
 from __future__ import annotations
 
 import base64
@@ -148,12 +149,17 @@ async def _write_to_gcs(sub_data: dict, msg: dict) -> None:
     gcs_cfg = sub_data.get("cloudStorageConfig") or {}
     bucket = gcs_cfg.get("bucket", "")
     if not bucket:
-        logger.warning("cloudStorageConfig missing bucket for subscription %s", sub_data.get("name", ""))
+        logger.warning(
+            "cloudStorageConfig missing bucket for subscription %s",
+            sub_data.get("name", ""),
+        )
         return
 
     gcs_store = get_gcs_store()
     if not gcs_store.exists("buckets", bucket):
-        logger.warning("GCS bucket '%s' not found for subscription %s", bucket, sub_data.get("name", ""))
+        logger.warning(
+            "GCS bucket '%s' not found for subscription %s", bucket, sub_data.get("name", "")
+        )
         return
 
     prefix = gcs_cfg.get("filenamePrefix", "")
@@ -167,12 +173,14 @@ async def _write_to_gcs(sub_data: dict, msg: dict) -> None:
         write_metadata = (avro_cfg or {}).get("writeMetadata", False)
         record: dict = {"data": raw_data}
         if write_metadata:
-            record.update({
-                "subscription_name": sub_data.get("name", ""),
-                "message_id": msg.get("messageId", ""),
-                "publish_time": msg.get("publishTime", ""),
-                "attributes": msg.get("attributes", {}),
-            })
+            record.update(
+                {
+                    "subscription_name": sub_data.get("name", ""),
+                    "message_id": msg.get("messageId", ""),
+                    "publish_time": msg.get("publishTime", ""),
+                    "attributes": msg.get("attributes", {}),
+                }
+            )
         body_bytes = json.dumps(record).encode("utf-8")
         content_type = "application/avro"
     else:
@@ -235,7 +243,9 @@ async def update_topic(project: str, topic_id: str, body: CreateTopicBody | None
         if body.labels is not None:
             data["labels"] = body.labels
         if body.schemaSettings is not None:
-            if body.schemaSettings.schema_ and not store.exists("schemas", body.schemaSettings.schema_):
+            if body.schemaSettings.schema_ and not store.exists(
+                "schemas", body.schemaSettings.schema_
+            ):
                 raise GCPError(404, f"Schema not found: {body.schemaSettings.schema_}")
             data["schemaSettings"] = body.schemaSettings.model_dump(by_alias=True)
         data["messageRetentionDuration"] = body.messageRetentionDuration
@@ -257,11 +267,15 @@ async def get_topic(project: str, topic_id: str):
 async def list_topics(project: str, pageSize: int = 100, pageToken: str = ""):
     store = ps_store.get_store()
     prefix = f"projects/{project}/topics/"
-    items = [TopicModel.model_validate(v) for v in store.list("topics") if v["name"].startswith(prefix)]
+    items = [
+        TopicModel.model_validate(v) for v in store.list("topics") if v["name"].startswith(prefix)
+    ]
     offset = int(pageToken) if pageToken else 0
-    page = items[offset: offset + pageSize]
+    page = items[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(items) else None
-    return TopicListResponse(topics=page, nextPageToken=next_token).model_dump(by_alias=True, exclude_none=True)
+    return TopicListResponse(topics=page, nextPageToken=next_token).model_dump(
+        by_alias=True, exclude_none=True
+    )
 
 
 @app.delete("/v1/projects/{project}/topics/{topic_id}", status_code=204)
@@ -302,7 +316,7 @@ async def publish(
                 try:
                     msg_bytes = base64.b64decode(raw_data) if raw_data else b""
                 except Exception:
-                    raise GCPError(400, "Message data is not valid base64")
+                    raise GCPError(400, "Message data is not valid base64") from e
                 err = validate_message_against_schema(schema_type, definition, msg_bytes, encoding)
                 if err:
                     raise GCPError(400, f"Message failed schema validation: {err}")
@@ -345,7 +359,9 @@ async def publish(
                 pulled = ps_store.pull(sub_name, 1)
                 if pulled:
                     ack_id, pulled_msg, _ = pulled[0]
-                    background_tasks.add_task(_dispatch_push, push_endpoint, sub_name, ack_id, pulled_msg)
+                    background_tasks.add_task(
+                        _dispatch_push, push_endpoint, sub_name, ack_id, pulled_msg
+                    )
 
     return PublishResponse(messageIds=message_ids).model_dump()
 
@@ -366,7 +382,9 @@ async def create_subscription(project: str, sub_id: str, body: SubscriptionModel
     if not store.exists("topics", body.topic):
         raise GCPError(404, f"Topic not found: {body.topic}")
 
-    sub = SubscriptionModel(name=full_name, **{k: v for k, v in body.model_dump().items() if k != "name"})
+    sub = SubscriptionModel(
+        name=full_name, **{k: v for k, v in body.model_dump().items() if k != "name"}
+    )
 
     # Validate BigQuery / Cloud Storage configs
     if sub.bigqueryConfig and sub.bigqueryConfig.table:
@@ -395,11 +413,15 @@ async def get_subscription(project: str, sub_id: str):
 async def list_subscriptions(project: str, pageSize: int = 100, pageToken: str = ""):
     store = ps_store.get_store()
     prefix = f"projects/{project}/subscriptions/"
-    items = [SubscriptionModel(**v) for v in store.list("subscriptions") if v["name"].startswith(prefix)]
+    items = [
+        SubscriptionModel(**v) for v in store.list("subscriptions") if v["name"].startswith(prefix)
+    ]
     offset = int(pageToken) if pageToken else 0
-    page = items[offset: offset + pageSize]
+    page = items[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(items) else None
-    return SubscriptionListResponse(subscriptions=page, nextPageToken=next_token).model_dump(exclude_none=True)
+    return SubscriptionListResponse(subscriptions=page, nextPageToken=next_token).model_dump(
+        exclude_none=True
+    )
 
 
 @app.delete("/v1/projects/{project}/subscriptions/{sub_id}", status_code=204)
@@ -422,7 +444,10 @@ async def pull_messages(project: str, sub_id: str, body: PullRequest):
 
     push_endpoint = (sub_data.get("pushConfig") or {}).get("pushEndpoint", "")
     if push_endpoint:
-        raise GCPError(400, f"Subscription {full_name} is a push subscription and cannot be pulled from directly")
+        raise GCPError(
+            400,
+            f"Subscription {full_name} is a push subscription and cannot be pulled from directly",
+        )
 
     ps_store.ensure_queue(full_name)
     results = ps_store.pull(full_name, body.maxMessages)
@@ -518,9 +543,11 @@ async def list_snapshots(project: str, pageSize: int = 100, pageToken: str = "")
     prefix = f"projects/{project}/snapshots/"
     items = [SnapshotModel(**v) for v in store.list("snapshots") if v["name"].startswith(prefix)]
     offset = int(pageToken) if pageToken else 0
-    page = items[offset: offset + pageSize]
+    page = items[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(items) else None
-    return SnapshotListResponse(snapshots=page, nextPageToken=next_token).model_dump(exclude_none=True)
+    return SnapshotListResponse(snapshots=page, nextPageToken=next_token).model_dump(
+        exclude_none=True
+    )
 
 
 @app.patch("/v1/projects/{project}/snapshots/{snap_id}")
@@ -550,6 +577,7 @@ async def delete_snapshot(project: str, snap_id: str):
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+
 
 @app.post("/v1/projects/{project}/schemas")
 async def create_schema(project: str, body: SchemaModel, schemaId: str = ""):
@@ -591,7 +619,7 @@ async def list_schemas(project: str, pageSize: int = 100, pageToken: str = ""):
     prefix = f"projects/{project}/schemas/"
     items = [SchemaModel(**v) for v in store.list("schemas") if v["name"].startswith(prefix)]
     offset = int(pageToken) if pageToken else 0
-    page = items[offset: offset + pageSize]
+    page = items[offset : offset + pageSize]
     next_token = str(offset + pageSize) if offset + pageSize < len(items) else None
     return SchemaListResponse(schemas=page, nextPageToken=next_token).model_dump(exclude_none=True)
 
@@ -633,7 +661,7 @@ async def validate_message_endpoint(project: str, body: ValidateMessageRequest):
     try:
         msg_bytes = base64.b64decode(body.message) if body.message else b""
     except Exception:
-        raise GCPError(400, "message is not valid base64")
+        raise GCPError(400, "message is not valid base64") from e
 
     err = validate_message_against_schema(schema_type, definition, msg_bytes, body.encoding)
     if err:

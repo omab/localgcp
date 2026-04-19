@@ -10,6 +10,7 @@ and a trailing PRIMARY KEY clause. _rewrite_ddl() converts these to DuckDB form.
 SQL rewriting: Spanner SQL uses @param_name parameters and unqualified table names.
 _rewrite_spanner_sql() converts these to DuckDB-compatible form.
 """
+
 from __future__ import annotations
 
 import base64
@@ -17,9 +18,10 @@ import json
 import re
 import threading
 import uuid
-from datetime import date, datetime, timezone
+from collections.abc import Iterator
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import duckdb
 
@@ -86,7 +88,7 @@ def _duck_type_to_spanner(duck_type: str) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _serialize_spanner(v: Any, spanner_type_code: str = "STRING") -> Any:
@@ -191,8 +193,7 @@ def _parse_col_def(col_def: str) -> tuple[str, str, bool] | None:
 
 
 def _rewrite_create_table(stmt: str, schema: str) -> tuple[str, list[str]]:
-    """
-    Rewrite a Spanner CREATE TABLE statement to DuckDB.
+    """Rewrite a Spanner CREATE TABLE statement to DuckDB.
     Returns (duckdb_sql, pk_columns).
     """
     # Normalize whitespace while preserving structure
@@ -258,8 +259,7 @@ def _rewrite_create_table(stmt: str, schema: str) -> tuple[str, list[str]]:
 
 
 def _rewrite_ddl(stmt: str, schema: str) -> tuple[str, list[str]]:
-    """
-    Rewrite a single Spanner DDL statement to DuckDB SQL.
+    """Rewrite a single Spanner DDL statement to DuckDB SQL.
     Returns (duckdb_sql, pk_cols) where pk_cols is non-empty only for CREATE TABLE.
     """
     s = stmt.strip()
@@ -278,7 +278,8 @@ def _rewrite_ddl(stmt: str, schema: str) -> tuple[str, list[str]]:
         # Handle ADD COLUMN
         m = re.match(
             r"ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?\s+(.+)",
-            s, re.IGNORECASE,
+            s,
+            re.IGNORECASE,
         )
         if m:
             table_name = m.group(1)
@@ -292,19 +293,25 @@ def _rewrite_ddl(stmt: str, schema: str) -> tuple[str, list[str]]:
             duck_type = _spanner_type_to_duck(rest)
             nn = " NOT NULL" if not_null else ""
             return (
-                f'ALTER TABLE "{schema}"."{table_name}" ADD COLUMN IF NOT EXISTS "{col_name}" {duck_type}{nn}',
+                f'ALTER TABLE "{schema}"."{table_name}" ADD COLUMN IF NOT EXISTS'
+                f' "{col_name}" {duck_type}{nn}',
                 [],
             )
         # Handle DROP COLUMN
         m = re.match(
             r"ALTER\s+TABLE\s+`?(\w+)`?\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?`?(\w+)`?",
-            s, re.IGNORECASE,
+            s,
+            re.IGNORECASE,
         )
         if m:
             return f'ALTER TABLE "{schema}"."{m.group(1)}" DROP COLUMN IF EXISTS "{m.group(2)}"', []
         return s, []
 
-    if upper.startswith("CREATE INDEX") or upper.startswith("CREATE UNIQUE INDEX") or upper.startswith("DROP INDEX"):
+    if (
+        upper.startswith("CREATE INDEX")
+        or upper.startswith("CREATE UNIQUE INDEX")
+        or upper.startswith("DROP INDEX")
+    ):
         # DuckDB supports CREATE INDEX but not all Spanner index syntax; best-effort
         # Strip STORING (...) and INTERLEAVE clauses
         s = re.sub(r"\s+STORING\s*\([^)]*\)", "", s, flags=re.IGNORECASE)
@@ -312,13 +319,13 @@ def _rewrite_ddl(stmt: str, schema: str) -> tuple[str, list[str]]:
         # Rewrite table/index identifiers to schema-qualified
         m = re.match(
             r"(CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?\s+ON\s+)`?(\w+)`?\s*\((.+)\)",
-            s, re.IGNORECASE | re.DOTALL,
+            s,
+            re.IGNORECASE | re.DOTALL,
         )
         if m:
             idx_name = m.group(2)
             tbl_name = m.group(3)
             cols = m.group(4).strip()
-            prefix = m.group(1)
             # Quote each column name in the index
             cols_q = ", ".join(
                 f'"{c.strip().strip("`").split()[0]}"'
@@ -348,8 +355,7 @@ def _is_select(sql: str) -> bool:
 
 
 def _rewrite_spanner_sql(sql: str, schema: str) -> tuple[str, list[str]]:
-    """
-    Rewrite Spanner SQL to DuckDB SQL.
+    """Rewrite Spanner SQL to DuckDB SQL.
     Returns (duckdb_sql, param_names_in_order).
     """
     param_names: list[str] = []
@@ -417,11 +423,11 @@ class SpannerEngine:
         self._lock = threading.Lock()
 
         # Metadata dicts
-        self._instances: dict[str, dict] = {}       # keyed by "{project}/{instance}"
-        self._databases: dict[str, dict] = {}       # keyed by "{project}/{instance}/{database}"
-        self._sessions: dict[str, dict] = {}        # keyed by session full resource name
-        self._transactions: dict[str, dict] = {}    # keyed by transaction id
-        self._operations: dict[str, dict] = {}      # keyed by operation name
+        self._instances: dict[str, dict] = {}  # keyed by "{project}/{instance}"
+        self._databases: dict[str, dict] = {}  # keyed by "{project}/{instance}/{database}"
+        self._sessions: dict[str, dict] = {}  # keyed by session full resource name
+        self._transactions: dict[str, dict] = {}  # keyed by transaction id
+        self._operations: dict[str, dict] = {}  # keyed by operation name
 
         # DDL tracking per database (for getDatabaseDdl)
         self._ddl_statements: dict[str, list[str]] = {}  # key: "{project}/{instance}/{database}"
@@ -487,7 +493,9 @@ class SpannerEngine:
             raise ValueError(f"Instance already exists: {instance_id}")
         meta = {
             "name": f"projects/{project}/instances/{instance_id}",
-            "config": body.get("config", f"projects/{project}/instanceConfigs/regional-us-central1"),
+            "config": body.get(
+                "config", f"projects/{project}/instanceConfigs/regional-us-central1"
+            ),
             "displayName": body.get("displayName", instance_id),
             "nodeCount": body.get("nodeCount", 1),
             "processingUnits": body.get("processingUnits", 1000),
@@ -498,7 +506,14 @@ class SpannerEngine:
         }
         self._instances[key] = meta
         op_name = f"projects/{project}/instances/{instance_id}/operations/{uuid.uuid4()}"
-        op = {"name": op_name, "done": True, "response": {"@type": "type.googleapis.com/google.spanner.admin.instance.v1.Instance", **meta}}
+        op = {
+            "name": op_name,
+            "done": True,
+            "response": {
+                "@type": "type.googleapis.com/google.spanner.admin.instance.v1.Instance",
+                **meta,
+            },
+        }
         self._operations[op_name] = op
         return op
 
@@ -591,14 +606,21 @@ class SpannerEngine:
                         duckdb_sql, pk_cols = _rewrite_ddl(stmt, schema)
                         self._exec(duckdb_sql)
                         if pk_cols:
-                            m2 = re.search(r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?', stmt, re.IGNORECASE)
+                            m2 = re.search(
+                                r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?",
+                                stmt,
+                                re.IGNORECASE,
+                            )
                             if m2:
                                 self._table_pks[f'"{schema}"."{m2.group(1)}"'] = pk_cols
                         self._ddl_statements[db_key].append(stmt)
                     except Exception:
                         pass
 
-        op_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/operations/{uuid.uuid4()}"
+        op_name = (
+            f"projects/{project}/instances/{instance_id}"
+            f"/databases/{database_id}/operations/{uuid.uuid4()}"
+        )
         op = {
             "name": op_name,
             "done": True,
@@ -644,7 +666,9 @@ class SpannerEngine:
                 duckdb_sql, pk_cols = _rewrite_ddl(stmt, schema)
                 self._exec(duckdb_sql)
                 if pk_cols:
-                    m2 = re.search(r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?', stmt, re.IGNORECASE)
+                    m2 = re.search(
+                        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?", stmt, re.IGNORECASE
+                    )
                     if m2:
                         self._table_pks[f'"{schema}"."{m2.group(1)}"'] = pk_cols
                 executed.append(stmt)
@@ -664,9 +688,7 @@ class SpannerEngine:
         self._operations[op_name] = op
         return op
 
-    def get_database_ddl(
-        self, project: str, instance_id: str, database_id: str
-    ) -> list[str]:
+    def get_database_ddl(self, project: str, instance_id: str, database_id: str) -> list[str]:
         db_key = f"{project}/{instance_id}/databases/{database_id}"
         return self._ddl_statements.get(db_key, [])
 
@@ -677,7 +699,10 @@ class SpannerEngine:
     def _session_resource(
         self, project: str, instance_id: str, database_id: str, session_id: str
     ) -> str:
-        return f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+        return (
+            f"projects/{project}/instances/{instance_id}"
+            f"/databases/{database_id}/sessions/{session_id}"
+        )
 
     def create_session(
         self, project: str, instance_id: str, database_id: str, labels: dict | None = None
@@ -729,8 +754,7 @@ class SpannerEngine:
         labels: dict | None = None,
     ) -> list[dict]:
         return [
-            self.create_session(project, instance_id, database_id, labels)
-            for _ in range(count)
+            self.create_session(project, instance_id, database_id, labels) for _ in range(count)
         ]
 
     def _session_schema(self, session_name: str) -> str:
@@ -785,7 +809,9 @@ class SpannerEngine:
             return v
         return v
 
-    def _apply_insert(self, schema: str, table: str, columns: list[str], values: list[list]) -> None:
+    def _apply_insert(
+        self, schema: str, table: str, columns: list[str], values: list[list]
+    ) -> None:
         col_names = ", ".join(f'"{c}"' for c in columns)
         placeholders = ", ".join("?" for _ in columns)
         for row in values:
@@ -795,7 +821,9 @@ class SpannerEngine:
                 params,
             )
 
-    def _apply_update(self, schema: str, table: str, columns: list[str], values: list[list]) -> None:
+    def _apply_update(
+        self, schema: str, table: str, columns: list[str], values: list[list]
+    ) -> None:
         pk_key = f'"{schema}"."{table}"'
         pk_cols = self._table_pks.get(pk_key, [])
 
@@ -806,14 +834,15 @@ class SpannerEngine:
                 col_names = ", ".join(f'"{c}"' for c in columns)
                 placeholders = ", ".join("?" for _ in columns)
                 self._exec(
-                    f'INSERT OR REPLACE INTO "{schema}"."{table}" ({col_names}) VALUES ({placeholders})',
+                    f'INSERT OR REPLACE INTO "{schema}"."{table}"'
+                    f" ({col_names}) VALUES ({placeholders})",
                     params,
                 )
             return
 
         pk_set = set(pk_cols)
         for row in values:
-            row_dict = dict(zip(columns, row))
+            row_dict = dict(zip(columns, row, strict=False))
             pk_vals = [self._coerce_value(row_dict[c]) for c in pk_cols if c in row_dict]
             non_pk_cols = [c for c in columns if c not in pk_set]
 
@@ -848,7 +877,8 @@ class SpannerEngine:
         for row in values:
             params = [self._coerce_value(v) for v in row]
             self._exec(
-                f'INSERT INTO "{schema}"."{table}" ({col_names}) VALUES ({placeholders}) {conflict_clause}',
+                f'INSERT INTO "{schema}"."{table}"'
+                f" ({col_names}) VALUES ({placeholders}) {conflict_clause}",
                 params,
             )
 
@@ -879,7 +909,6 @@ class SpannerEngine:
         elif keys:
             # No PK info — try first-column deletion
             for key in keys:
-                key_val = key[0] if isinstance(key, list) else key
                 # Can't safely delete without knowing PKs; skip
                 pass
 
@@ -974,7 +1003,10 @@ class SpannerEngine:
             if len(pk_cols) == 1:
                 placeholders = ", ".join("?" for _ in keys)
                 params = [self._coerce_value(k[0] if isinstance(k, list) else k) for k in keys]
-                sql = f'SELECT {col_str} FROM "{schema}"."{table}" WHERE "{pk_col}" IN ({placeholders}){limit_clause}'
+                sql = (
+                    f'SELECT {col_str} FROM "{schema}"."{table}"'
+                    f' WHERE "{pk_col}" IN ({placeholders}){limit_clause}'
+                )
                 duck_cols, rows = self._select(sql, params)
             else:
                 # Multi-PK: fetch all and filter (simplified)
@@ -1015,7 +1047,10 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def _build_result_set(
-        self, duck_cols: list[tuple[str, str]], rows: list[tuple], col_names: list[str] | None = None
+        self,
+        duck_cols: list[tuple[str, str]],
+        rows: list[tuple],
+        col_names: list[str] | None = None,
     ) -> dict:
         """Build a Spanner ResultSet from DuckDB result columns and rows."""
         fields = []
@@ -1039,9 +1074,7 @@ class SpannerEngine:
             "rows": spanner_rows,
         }
 
-    def _resolve_params(
-        self, param_names: list[str], params: dict, param_types: dict
-    ) -> list[Any]:
+    def _resolve_params(self, param_names: list[str], params: dict, param_types: dict) -> list[Any]:
         """Convert @param_name params to positional list for DuckDB."""
         result = []
         for name in param_names:
@@ -1131,16 +1164,20 @@ class SpannerEngine:
                 positional = self._resolve_params(param_names, params, param_types)
                 duck_cols, rows = self._select(rewritten, positional)
                 count = rows[0][0] if rows and duck_cols and duck_cols[0][0] == "Count" else 0
-                result_sets.append({
-                    "metadata": {"rowType": {"fields": []}},
-                    "stats": {"rowCountExact": str(count)},
-                })
+                result_sets.append(
+                    {
+                        "metadata": {"rowType": {"fields": []}},
+                        "stats": {"rowCountExact": str(count)},
+                    }
+                )
             except Exception as exc:
-                result_sets.append({
-                    "metadata": {"rowType": {"fields": []}},
-                    "stats": {"rowCountExact": "0"},
-                    "error": {"code": 3, "message": str(exc)},
-                })
+                result_sets.append(
+                    {
+                        "metadata": {"rowType": {"fields": []}},
+                        "stats": {"rowCountExact": "0"},
+                        "error": {"code": 3, "message": str(exc)},
+                    }
+                )
         return {"resultSets": result_sets, "status": {}}
 
     # -------------------------------------------------------------------------

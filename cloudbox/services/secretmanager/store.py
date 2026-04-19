@@ -5,6 +5,7 @@ Namespaces:
   versions  → "{secret_name}/versions/{n}" → SecretVersionModel dict
   payloads  → "{secret_name}/versions/{n}" → base64-encoded data string
 """
+
 from cloudbox.config import settings
 from cloudbox.core.store import NamespacedStore
 

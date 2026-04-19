@@ -1,5 +1,5 @@
-from cloudbox.core.store import NamespacedStore
 from cloudbox.config import settings
+from cloudbox.core.store import NamespacedStore
 
 _store = NamespacedStore("logging", data_dir=settings.data_dir)
 

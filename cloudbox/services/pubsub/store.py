@@ -12,14 +12,15 @@ Message queues are kept in _queues: sub_name → deque of _Envelope.
 Unacked messages are in _unacked: sub_name → {ack_id: _Envelope}.
 Topic message log in _topic_log: topic_name → list of message dicts.
 """
+
 from __future__ import annotations
 
 import threading
 import time
 import uuid
 from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from cloudbox.config import settings
 from cloudbox.core.store import NamespacedStore
@@ -28,7 +29,7 @@ _store = NamespacedStore("pubsub", settings.data_dir)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _parse_duration(s: str) -> float:
@@ -41,17 +42,17 @@ def _parse_duration(s: str) -> float:
 
 @dataclass
 class _Envelope:
-    message: dict          # PubsubMessage dict
-    ack_deadline: float = 0.0   # epoch seconds when ack expires
+    message: dict  # PubsubMessage dict
+    ack_deadline: float = 0.0  # epoch seconds when ack expires
     delivery_attempt: int = 1
-    not_before: float = 0.0     # monotonic time before which the message should not be delivered
+    not_before: float = 0.0  # monotonic time before which the message should not be delivered
 
 
 _lock = threading.RLock()
-_queues: dict[str, deque[_Envelope]] = {}    # sub → pending messages
+_queues: dict[str, deque[_Envelope]] = {}  # sub → pending messages
 _unacked: dict[str, dict[str, _Envelope]] = {}  # sub → ack_id → envelope
-_inflight_keys: dict[str, set[str]] = {}     # sub → set of ordering keys currently unacked
-_topic_log: dict[str, list[dict]] = {}       # topic → retained messages (for seek)
+_inflight_keys: dict[str, set[str]] = {}  # sub → set of ordering keys currently unacked
+_topic_log: dict[str, list[dict]] = {}  # topic → retained messages (for seek)
 
 
 def get_store() -> NamespacedStore:
@@ -104,7 +105,11 @@ def pull(sub_name: str, max_messages: int) -> list[tuple[str, dict, int]]:
             key = env.message.get("orderingKey", "") if ordering else ""
             if key:
                 inflight.discard(key)
-            if dlp and dlp.get("deadLetterTopic") and env.delivery_attempt > dlp.get("maxDeliveryAttempts", 5):
+            if (
+                dlp
+                and dlp.get("deadLetterTopic")
+                and env.delivery_attempt > dlp.get("maxDeliveryAttempts", 5)
+            ):
                 _route_to_dlq(dlp["deadLetterTopic"], env.message)
             else:
                 if rp:
@@ -257,15 +262,14 @@ def seek_subscription(sub_name: str, topic: str, since_iso: str) -> None:
     from the topic log that pass the subscription's filter expression.
     """
     from cloudbox.services.pubsub.filter import matches as filter_matches
+
     sub_data = _store.get("subscriptions", sub_name) or {}
     filter_expr = sub_data.get("filter", "")
 
     with _lock:
         messages = _log_since_locked(topic, since_iso)
         _queues[sub_name] = deque(
-            _Envelope(message=m)
-            for m in messages
-            if filter_matches(filter_expr, m)
+            _Envelope(message=m) for m in messages if filter_matches(filter_expr, m)
         )
         _unacked[sub_name] = {}
         _inflight_keys[sub_name] = set()
@@ -274,6 +278,7 @@ def seek_subscription(sub_name: str, topic: str, since_iso: str) -> None:
 # ---------------------------------------------------------------------------
 # Snapshots
 # ---------------------------------------------------------------------------
+
 
 def create_snapshot(snap_name: str, sub_name: str) -> dict | None:
     """Create a snapshot capturing the subscription's current backlog cursor.
@@ -291,7 +296,8 @@ def create_snapshot(snap_name: str, sub_name: str) -> dict | None:
 
     # Snapshot expires in 7 days (GCS default)
     from datetime import timedelta
-    expire_dt = datetime.now(timezone.utc) + timedelta(days=7)
+
+    expire_dt = datetime.now(UTC) + timedelta(days=7)
     expire_str = expire_dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     snap = {

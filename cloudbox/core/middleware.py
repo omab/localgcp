@@ -1,4 +1,5 @@
 """Request/response logging middleware for Cloudbox services."""
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +26,11 @@ def add_request_logging(app: FastAPI, service_name: str) -> None:
                 elapsed_ms = (time.monotonic() - start) * 1000
                 logger.error(
                     "✗ %s %s%s — unhandled exception (%.0f ms): %s",
-                    request.method, request.url.path, qs, elapsed_ms, exc,
+                    request.method,
+                    request.url.path,
+                    qs,
+                    elapsed_ms,
+                    exc,
                     exc_info=True,
                 )
                 raise
@@ -35,8 +40,11 @@ def add_request_logging(app: FastAPI, service_name: str) -> None:
             logger.log(
                 level,
                 "← %s %s%s  %d  (%.0f ms)",
-                request.method, request.url.path, qs,
-                response.status_code, elapsed_ms,
+                request.method,
+                request.url.path,
+                qs,
+                response.status_code,
+                elapsed_ms,
             )
             return response
 

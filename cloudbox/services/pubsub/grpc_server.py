@@ -15,13 +15,14 @@ REST alternative (if you prefer HTTP/1.1):
         client_options=ClientOptions(api_endpoint="http://localhost:8086"),
     )
 """
+
 from __future__ import annotations
 
 import asyncio
 import base64
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import grpc
 import grpc.aio
@@ -39,21 +40,24 @@ logger = logging.getLogger("cloudbox.pubsub.grpc")
 
 def _types():
     from google.pubsub_v1.types import pubsub as t
+
     return t
 
 
 def _schema_types():
     from google.pubsub_v1.types import schema as st
+
     return st
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 # ---------------------------------------------------------------------------
 # Serialization helpers for protobuf Empty (not proto-plus)
 # ---------------------------------------------------------------------------
+
 
 def _ser_empty(e) -> bytes:
     return b""
@@ -62,6 +66,7 @@ def _ser_empty(e) -> bytes:
 # ---------------------------------------------------------------------------
 # Store ↔ proto conversion helpers
 # ---------------------------------------------------------------------------
+
 
 def _topic_to_proto(data: dict):
     t = _types()
@@ -86,7 +91,6 @@ def _topic_to_dict(proto) -> dict:
     }
     ss = proto.schema_settings
     if ss and ss.schema:
-        st = _schema_types()
         enc_name = ss.encoding.name if hasattr(ss.encoding, "name") else str(ss.encoding)
         d["schemaSettings"] = {"schema": ss.schema, "encoding": enc_name}
     return d
@@ -120,6 +124,7 @@ def _sub_to_dict(proto) -> dict:
 # ---------------------------------------------------------------------------
 # Publisher handlers
 # ---------------------------------------------------------------------------
+
 
 async def _create_topic(request, context):
     store = ps_store.get_store()
@@ -161,7 +166,7 @@ async def _list_topics(request, context):
     items = [_topic_to_proto(v) for v in store.list("topics") if v["name"].startswith(prefix)]
     offset = int(request.page_token) if request.page_token else 0
     page_size = request.page_size or 100
-    page = items[offset: offset + page_size]
+    page = items[offset : offset + page_size]
     next_token = str(offset + page_size) if offset + page_size < len(items) else ""
     return t.ListTopicsResponse(topics=page, next_page_token=next_token)
 
@@ -215,13 +220,10 @@ async def _list_topic_subscriptions(request, context):
     if not store.exists("topics", request.topic):
         await context.abort(grpc.StatusCode.NOT_FOUND, f"Topic not found: {request.topic}")
         return
-    subs = [
-        v["name"] for v in store.list("subscriptions")
-        if v.get("topic") == request.topic
-    ]
+    subs = [v["name"] for v in store.list("subscriptions") if v.get("topic") == request.topic]
     offset = int(request.page_token) if request.page_token else 0
     page_size = request.page_size or 100
-    page = subs[offset: offset + page_size]
+    page = subs[offset : offset + page_size]
     next_token = str(offset + page_size) if offset + page_size < len(subs) else ""
     return t.ListTopicSubscriptionsResponse(subscriptions=page, next_page_token=next_token)
 
@@ -229,6 +231,7 @@ async def _list_topic_subscriptions(request, context):
 # ---------------------------------------------------------------------------
 # Subscriber handlers
 # ---------------------------------------------------------------------------
+
 
 async def _create_subscription(request, context):
     store = ps_store.get_store()
@@ -249,7 +252,9 @@ async def _get_subscription(request, context):
     store = ps_store.get_store()
     data = store.get("subscriptions", request.subscription)
     if data is None:
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
     return _sub_to_proto(data)
 
@@ -258,7 +263,9 @@ async def _update_subscription(request, context):
     store = ps_store.get_store()
     data = store.get("subscriptions", request.subscription.name)
     if data is None:
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription.name}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription.name}"
+        )
         return
     paths = list(request.update_mask.paths) if request.update_mask else []
     if not paths or "ack_deadline_seconds" in paths:
@@ -276,7 +283,7 @@ async def _list_subscriptions(request, context):
     items = [_sub_to_proto(v) for v in store.list("subscriptions") if v["name"].startswith(prefix)]
     offset = int(request.page_token) if request.page_token else 0
     page_size = request.page_size or 100
-    page = items[offset: offset + page_size]
+    page = items[offset : offset + page_size]
     next_token = str(offset + page_size) if offset + page_size < len(items) else ""
     return t.ListSubscriptionsResponse(subscriptions=page, next_page_token=next_token)
 
@@ -284,7 +291,9 @@ async def _list_subscriptions(request, context):
 async def _delete_subscription(request, context):
     store = ps_store.get_store()
     if not store.delete("subscriptions", request.subscription):
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
     ps_store.remove_queue(request.subscription)
     logger.info("DeleteSubscription %s", request.subscription)
@@ -295,7 +304,9 @@ async def _pull(request, context):
     t = _types()
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
 
     ps_store.ensure_queue(request.subscription)
@@ -310,18 +321,22 @@ async def _pull(request, context):
             message_id=msg.get("messageId", ""),
             ordering_key=msg.get("orderingKey", ""),
         )
-        received.append(t.ReceivedMessage(
-            ack_id=ack_id,
-            message=pubsub_msg,
-            delivery_attempt=attempt,
-        ))
+        received.append(
+            t.ReceivedMessage(
+                ack_id=ack_id,
+                message=pubsub_msg,
+                delivery_attempt=attempt,
+            )
+        )
     return t.PullResponse(received_messages=received)
 
 
 async def _acknowledge(request, context):
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
     ps_store.acknowledge(request.subscription, list(request.ack_ids))
     return empty_pb2.Empty()
@@ -330,27 +345,34 @@ async def _acknowledge(request, context):
 async def _modify_ack_deadline(request, context):
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
-    ps_store.modify_ack_deadline(request.subscription, list(request.ack_ids), request.ack_deadline_seconds)
+    ps_store.modify_ack_deadline(
+        request.subscription, list(request.ack_ids), request.ack_deadline_seconds
+    )
     return empty_pb2.Empty()
 
 
 async def _create_snapshot(request, context):
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
     snap = ps_store.create_snapshot(request.name, request.subscription)
     if snap is None:
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
     if request.labels:
         snap["labels"] = dict(request.labels)
         store.set("snapshots", request.name, snap)
     t = _types()
-    return t.Snapshot(name=snap["name"], topic=snap["topic"],
-                      labels=snap.get("labels", {}))
+    return t.Snapshot(name=snap["name"], topic=snap["topic"], labels=snap.get("labels", {}))
 
 
 async def _get_snapshot(request, context):
@@ -374,7 +396,7 @@ async def _list_snapshots(request, context):
     ]
     offset = int(request.page_token) if request.page_token else 0
     page_size = request.page_size or 100
-    page = items[offset: offset + page_size]
+    page = items[offset : offset + page_size]
     next_token = str(offset + page_size) if offset + page_size < len(items) else ""
     return t.ListSnapshotsResponse(snapshots=page, next_page_token=next_token)
 
@@ -392,7 +414,9 @@ async def _seek(request, context):
     store = ps_store.get_store()
     sub_data = store.get("subscriptions", request.subscription)
     if sub_data is None:
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
 
     topic = sub_data["topic"]
@@ -400,7 +424,9 @@ async def _seek(request, context):
     if request.snapshot:
         snap = store.get("snapshots", request.snapshot)
         if snap is None:
-            await context.abort(grpc.StatusCode.NOT_FOUND, f"Snapshot not found: {request.snapshot}")
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Snapshot not found: {request.snapshot}"
+            )
             return
         since_iso = snap["snapshotTime"]
     elif request.time and request.time.timestamp() > 0:
@@ -418,6 +444,7 @@ async def _seek(request, context):
 # ---------------------------------------------------------------------------
 # SchemaService handlers
 # ---------------------------------------------------------------------------
+
 
 def _schema_type_name(type_val) -> str:
     """Convert a proto-plus Schema.Type enum value to its string name."""
@@ -437,7 +464,7 @@ def _dict_to_schema_proto(data: dict):
 
 async def _create_schema(request, context):
     from cloudbox.services.pubsub.models import validate_schema_definition
-    st = _schema_types()
+
     store = ps_store.get_store()
     schema_obj = request.schema  # proto-plus field is 'schema', not 'schema_'
     schema_name = schema_obj.name if schema_obj else ""
@@ -455,6 +482,7 @@ async def _create_schema(request, context):
         await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"Invalid schema: {err}")
         return
     from cloudbox.services.pubsub.app import _now
+
     data = {
         "name": schema_name,
         "type": schema_type,
@@ -480,13 +508,11 @@ async def _list_schemas_grpc(request, context):
     store = ps_store.get_store()
     prefix = f"{request.parent}/schemas/"
     items = [
-        _dict_to_schema_proto(v)
-        for v in store.list("schemas")
-        if v["name"].startswith(prefix)
+        _dict_to_schema_proto(v) for v in store.list("schemas") if v["name"].startswith(prefix)
     ]
     offset = int(request.page_token) if request.page_token else 0
     page_size = request.page_size or 100
-    page = items[offset: offset + page_size]
+    page = items[offset : offset + page_size]
     next_token = str(offset + page_size) if offset + page_size < len(items) else ""
     return st.ListSchemasResponse(schemas=page, next_page_token=next_token)
 
@@ -501,6 +527,7 @@ async def _delete_schema_grpc(request, context):
 
 async def _validate_schema_grpc(request, context):
     from cloudbox.services.pubsub.models import validate_schema_definition
+
     st = _schema_types()
     schema_obj = request.schema
     schema_type = _schema_type_name(schema_obj.type_)
@@ -514,6 +541,7 @@ async def _validate_schema_grpc(request, context):
 
 async def _validate_message_grpc(request, context):
     from cloudbox.services.pubsub.models import validate_message_against_schema
+
     st = _schema_types()
     store = ps_store.get_store()
 
@@ -529,14 +557,18 @@ async def _validate_message_grpc(request, context):
         schema_type = data["type"]
         definition = data.get("definition", "")
     else:
-        await context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Either schema or name must be provided")
+        await context.abort(
+            grpc.StatusCode.INVALID_ARGUMENT, "Either schema or name must be provided"
+        )
         return
 
     msg_bytes = bytes(request.message) if request.message else b""
     enc_name = request.encoding.name if hasattr(request.encoding, "name") else str(request.encoding)
     err = validate_message_against_schema(schema_type, definition, msg_bytes, enc_name)
     if err:
-        await context.abort(grpc.StatusCode.INVALID_ARGUMENT, f"Message failed schema validation: {err}")
+        await context.abort(
+            grpc.StatusCode.INVALID_ARGUMENT, f"Message failed schema validation: {err}"
+        )
         return
     return st.ValidateMessageResponse()
 
@@ -584,6 +616,7 @@ async def _streaming_pull(request_iterator, context):
                 for ack_id, deadline in zip(
                     list(req.modify_deadline_ack_ids),
                     list(req.modify_deadline_seconds),
+                    strict=False,
                 ):
                     ps_store.modify_ack_deadline(sub_name, [ack_id], int(deadline))
         except Exception:
@@ -608,11 +641,13 @@ async def _streaming_pull(request_iterator, context):
                         message_id=msg.get("messageId", ""),
                         ordering_key=msg.get("orderingKey", ""),
                     )
-                    received.append(t.ReceivedMessage(
-                        ack_id=ack_id,
-                        message=pubsub_msg,
-                        delivery_attempt=attempt,
-                    ))
+                    received.append(
+                        t.ReceivedMessage(
+                            ack_id=ack_id,
+                            message=pubsub_msg,
+                            delivery_attempt=attempt,
+                        )
+                    )
                 await context.write(t.StreamingPullResponse(received_messages=received))
             else:
                 await asyncio.sleep(0.05)
@@ -633,7 +668,9 @@ async def _modify_push_config(request, context):
     store = ps_store.get_store()
     data = store.get("subscriptions", request.subscription)
     if data is None:
-        await context.abort(grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}")
+        await context.abort(
+            grpc.StatusCode.NOT_FOUND, f"Subscription not found: {request.subscription}"
+        )
         return
     data["pushConfig"] = {
         "pushEndpoint": request.push_config.push_endpoint,
@@ -646,6 +683,7 @@ async def _modify_push_config(request, context):
 # ---------------------------------------------------------------------------
 # GenericRpcHandler that routes method paths to the handlers above
 # ---------------------------------------------------------------------------
+
 
 class _PubSubRpcHandler(grpc.GenericRpcHandler):
     """Routes all /google.pubsub.v1.{Publisher,Subscriber}/* gRPC calls."""
@@ -819,6 +857,7 @@ class _PubSubRpcHandler(grpc.GenericRpcHandler):
 # ---------------------------------------------------------------------------
 # Server factory
 # ---------------------------------------------------------------------------
+
 
 async def create_server(host: str, port: int) -> grpc.aio.Server:
     """Create (but do not start) the Pub/Sub gRPC server."""

@@ -3,6 +3,7 @@
 GCP APIs return errors in the format:
     {"error": {"code": <http_status>, "message": "<text>", "status": "<STATUS_CODE>"}}
 """
+
 import logging
 
 from fastapi import HTTPException
@@ -53,24 +54,31 @@ def add_gcp_exception_handler(app) -> None:
         logger.log(
             level,
             "%s %s → %d %s: %s",
-            request.method, request.url.path,
-            exc.status_code, exc.gcp_status, exc.message,
+            request.method,
+            request.url.path,
+            exc.status_code,
+            exc.gcp_status,
+            exc.message,
         )
         return JSONResponse(
             status_code=exc.status_code,
-            content={"error": {
-                "code": exc.status_code,
-                "message": exc.message,
-                "status": exc.gcp_status,
-            }},
+            content={
+                "error": {
+                    "code": exc.status_code,
+                    "message": exc.message,
+                    "status": exc.gcp_status,
+                }
+            },
         )
 
     @app.exception_handler(Exception)
     async def _generic_handler(request, exc: Exception):
         logger.error(
             "%s %s → 500 unhandled %s: %s",
-            request.method, request.url.path,
-            type(exc).__name__, exc,
+            request.method,
+            request.url.path,
+            type(exc).__name__,
+            exc,
             exc_info=True,
         )
         return JSONResponse(

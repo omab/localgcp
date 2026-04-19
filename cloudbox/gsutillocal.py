@@ -19,6 +19,7 @@ Usage:
     gsutillocal stat gs://bucket/object
     gsutillocal du [gs://bucket[/prefix]]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -76,22 +77,24 @@ def _is_gs(uri: str) -> bool:
 def _human_size(n: int) -> str:
     if n < 1024:
         return f"{n} B"
-    if n < 1024 ** 2:
+    if n < 1024**2:
         return f"{n / 1024:.1f} KiB"
-    if n < 1024 ** 3:
-        return f"{n / 1024 ** 2:.1f} MiB"
-    return f"{n / 1024 ** 3:.1f} GiB"
+    if n < 1024**3:
+        return f"{n / 1024**2:.1f} MiB"
+    return f"{n / 1024**3:.1f} GiB"
 
 
 def _upload_file(c, bucket: str, obj_name: str, path: Path) -> None:
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     data = path.read_bytes()
-    _check(c.post(
-        f"/upload/storage/v1/b/{bucket}/o",
-        params={"uploadType": "media", "name": obj_name},
-        content=data,
-        headers={"Content-Type": content_type},
-    ))
+    _check(
+        c.post(
+            f"/upload/storage/v1/b/{bucket}/o",
+            params={"uploadType": "media", "name": obj_name},
+            content=data,
+            headers={"Content-Type": content_type},
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +179,8 @@ def cmd_cp(args) -> None:
                     rel = f.relative_to(src_path.parent)
                     obj_name = (do_.rstrip("/") + "/" + str(rel)).lstrip("/") if do_ else str(rel)
                     _upload_file(c, db, obj_name, f)
-                    print(f"Copying file://{f.resolve()} [Content-Type={mimetypes.guess_type(f.name)[0] or 'application/octet-stream'}]...")
+                    ct = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+                    print(f"Copying file://{f.resolve()} [Content-Type={ct}]...")
                 print(f"  / [{len(files)} files]")
             else:
                 if not src_path.exists():
@@ -323,8 +327,13 @@ def register_subparsers(sub) -> None:
 
     p_mb = sub.add_parser("mb", help="Make bucket")
     p_mb.add_argument("bucket", metavar="gs://bucket")
-    p_mb.add_argument("-l", dest="location", metavar="LOCATION", default="",
-                      help="Bucket location (e.g. US-CENTRAL1)")
+    p_mb.add_argument(
+        "-l",
+        dest="location",
+        metavar="LOCATION",
+        default="",
+        help="Bucket location (e.g. US-CENTRAL1)",
+    )
 
     p_rb = sub.add_parser("rb", help="Remove bucket")
     p_rb.add_argument("bucket", metavar="gs://bucket")
@@ -349,10 +358,19 @@ def _build_parser() -> argparse.ArgumentParser:
         description="gsutil-compatible CLI for Cloudbox Cloud Storage emulator",
     )
     # Accept (and ignore) global flags gsutil users commonly pass
-    p.add_argument("-o", metavar="OPTION", action="append", default=[],
-                   help="Set a gsutil/boto option (accepted but ignored)")
-    p.add_argument("-m", dest="parallel", action="store_true",
-                   help="Parallel operations (accepted but ignored)")
+    p.add_argument(
+        "-o",
+        metavar="OPTION",
+        action="append",
+        default=[],
+        help="Set a gsutil/boto option (accepted but ignored)",
+    )
+    p.add_argument(
+        "-m",
+        dest="parallel",
+        action="store_true",
+        help="Parallel operations (accepted but ignored)",
+    )
 
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
@@ -361,15 +379,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 _COMMANDS = {
-    "ls":   cmd_ls,
-    "cp":   cmd_cp,
-    "mv":   cmd_mv,
-    "mb":   cmd_mb,
-    "rb":   cmd_rb,
-    "rm":   cmd_rm,
-    "cat":  cmd_cat,
+    "ls": cmd_ls,
+    "cp": cmd_cp,
+    "mv": cmd_mv,
+    "mb": cmd_mb,
+    "rb": cmd_rb,
+    "rm": cmd_rm,
+    "cat": cmd_cat,
     "stat": cmd_stat,
-    "du":   cmd_du,
+    "du": cmd_du,
 }
 
 

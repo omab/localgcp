@@ -1,4 +1,5 @@
 """Scheduler in-memory state."""
+
 from cloudbox.config import settings
 from cloudbox.core.store import NamespacedStore
 

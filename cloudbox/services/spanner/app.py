@@ -14,6 +14,7 @@ Transactions:   beginTransaction, rollback
 Data:           commit (mutations), read, streamingRead, executeSql, executeStreamingSql, executeBatchDml
 Operations:     get (always returns done=true)
 """
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request, Response
@@ -64,7 +65,7 @@ async def create_instance(project: str, request: Request):
     try:
         op = _engine().create_instance(project, instance_id, instance_body)
     except ValueError as e:
-        raise GCPError(409, str(e))
+        raise GCPError(409, str(e)) from e
     return op
 
 
@@ -88,7 +89,7 @@ async def update_instance(project: str, instance_id: str, request: Request):
     try:
         meta = _engine().update_instance(project, instance_id, body)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return meta
 
 
@@ -117,7 +118,7 @@ async def create_database(project: str, instance_id: str, request: Request):
     except ValueError as e:
         msg = str(e)
         code = 409 if "already exists" in msg.lower() else 400
-        raise GCPError(code, msg)
+        raise GCPError(code, msg) from e
     return op
 
 
@@ -156,7 +157,7 @@ async def update_ddl(project: str, instance_id: str, database_id: str, request: 
     try:
         op = _engine().execute_ddl(project, instance_id, database_id, statements)
     except ValueError as e:
-        raise GCPError(400, str(e))
+        raise GCPError(400, str(e)) from e
     return op
 
 
@@ -183,7 +184,7 @@ async def create_session(project: str, instance_id: str, database_id: str, reque
     try:
         session = _engine().create_session(project, instance_id, database_id, labels)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return session
 
 
@@ -191,16 +192,14 @@ async def create_session(project: str, instance_id: str, database_id: str, reque
     "/v1/projects/{project}/instances/{instance_id}/databases/{database_id}/sessions:batchCreate",
     status_code=200,
 )
-async def batch_create_sessions(
-    project: str, instance_id: str, database_id: str, request: Request
-):
+async def batch_create_sessions(project: str, instance_id: str, database_id: str, request: Request):
     body = await request.json()
     count = body.get("sessionCount", 1)
     labels = body.get("sessionTemplate", {}).get("labels") or {}
     try:
         sessions = _engine().batch_create_sessions(project, instance_id, database_id, count, labels)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return {"session": sessions}
 
 
@@ -218,7 +217,9 @@ async def list_sessions(project: str, instance_id: str, database_id: str):
     status_code=200,
 )
 async def get_session(project: str, instance_id: str, database_id: str, session_id: str):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     meta = _engine().get_session(session_name)
     if meta is None:
         raise GCPError(404, f"Session not found: {session_id}")
@@ -230,7 +231,9 @@ async def get_session(project: str, instance_id: str, database_id: str, session_
     status_code=200,
 )
 async def delete_session(project: str, instance_id: str, database_id: str, session_id: str):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     found = _engine().delete_session(session_name)
     if not found:
         raise GCPError(404, f"Session not found: {session_id}")
@@ -249,13 +252,15 @@ async def delete_session(project: str, instance_id: str, database_id: str, sessi
 async def begin_transaction(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     options = body.get("options", {})
     try:
         txn = _engine().begin_transaction(session_name, options)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return txn
 
 
@@ -266,7 +271,9 @@ async def begin_transaction(
 async def rollback(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     txn_id = body.get("transactionId", "")
     _engine().rollback(session_name, txn_id)
@@ -285,16 +292,18 @@ async def rollback(
 async def commit(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     mutations = body.get("mutations", [])
     txn_id = body.get("transactionId")
     try:
         result = _engine().commit(session_name, mutations, txn_id)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     except Exception as e:
-        raise GCPError(400, str(e))
+        raise GCPError(400, str(e)) from e
     return result
 
 
@@ -307,10 +316,10 @@ async def commit(
     "/v1/projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}:read",
     status_code=200,
 )
-async def read(
-    project: str, instance_id: str, database_id: str, session_id: str, request: Request
-):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+async def read(project: str, instance_id: str, database_id: str, session_id: str, request: Request):
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     table = body.get("table", "")
     columns = body.get("columns", [])
@@ -324,9 +333,9 @@ async def read(
     try:
         result = _engine().read(session_name, table, columns, key_set, limit, index)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     except Exception as e:
-        raise GCPError(400, str(e))
+        raise GCPError(400, str(e)) from e
     return result
 
 
@@ -337,7 +346,9 @@ async def read(
 async def streaming_read(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     table = body.get("table", "")
     columns = body.get("columns", [])
@@ -351,9 +362,10 @@ async def streaming_read(
     try:
         result = _engine().read(session_name, table, columns, key_set, limit, index)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
 
     import json as _json
+
     fields = result.get("metadata", {}).get("rowType", {}).get("fields", [])
     rows = result.get("rows", [])
     flat_values = [v for row in rows for v in row]
@@ -382,7 +394,9 @@ async def streaming_read(
 async def execute_sql(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     sql = body.get("sql", "")
     if not sql:
@@ -392,9 +406,9 @@ async def execute_sql(
     try:
         result = _engine().execute_sql(session_name, sql, params, param_types)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     except Exception as e:
-        raise GCPError(400, str(e))
+        raise GCPError(400, str(e)) from e
     return result
 
 
@@ -405,7 +419,9 @@ async def execute_sql(
 async def execute_streaming_sql(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     sql = body.get("sql", "")
     if not sql:
@@ -415,7 +431,7 @@ async def execute_streaming_sql(
     try:
         gen = _engine().execute_sql_streaming(session_name, sql, params, param_types)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return StreamingResponse(gen, media_type="application/json")
 
 
@@ -426,13 +442,15 @@ async def execute_streaming_sql(
 async def execute_batch_dml(
     project: str, instance_id: str, database_id: str, session_id: str, request: Request
 ):
-    session_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    session_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/{session_id}"
+    )
     body = await request.json()
     statements = body.get("statements", [])
     try:
         result = _engine().execute_batch_dml(session_name, statements)
     except ValueError as e:
-        raise GCPError(404, str(e))
+        raise GCPError(404, str(e)) from e
     return result
 
 
@@ -445,7 +463,9 @@ async def execute_batch_dml(
     "/v1/projects/{project}/instances/{instance_id}/databases/{database_id}/operations/{op_id}"
 )
 async def get_db_operation(project: str, instance_id: str, database_id: str, op_id: str):
-    op_name = f"projects/{project}/instances/{instance_id}/databases/{database_id}/operations/{op_id}"
+    op_name = (
+        f"projects/{project}/instances/{instance_id}/databases/{database_id}/operations/{op_id}"
+    )
     op = _engine().get_operation(op_name)
     if op is not None:
         return op
@@ -461,9 +481,7 @@ async def get_instance_operation(project: str, instance_id: str, op_id: str):
     return {"name": op_name, "done": True}
 
 
-@app.get(
-    "/v1/projects/{project}/instances/{instance_id}/databases/{database_id}/operations"
-)
+@app.get("/v1/projects/{project}/instances/{instance_id}/databases/{database_id}/operations")
 async def list_db_operations(project: str, instance_id: str, database_id: str):
     return {"operations": []}
 
