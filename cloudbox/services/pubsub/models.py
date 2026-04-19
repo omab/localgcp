@@ -243,7 +243,15 @@ class ValidateMessageRequest(BaseModel):
 
 
 def validate_schema_definition(schema_type: str, definition: str) -> str | None:
-    """Return an error message, or None if valid."""
+    """Validate a schema definition string for the given schema type.
+
+    Args:
+        schema_type (str): Schema type, e.g. 'AVRO' or 'PROTOCOL_BUFFER'.
+        definition (str): Schema definition string to validate.
+
+    Returns:
+        str | None: An error message describing the validation failure, or None if valid.
+    """
     if schema_type == "AVRO":
         try:
             json.loads(definition)
@@ -267,7 +275,17 @@ def validate_message_against_schema(
     message_bytes: bytes,
     encoding: str,
 ) -> str | None:
-    """Return an error message, or None if valid."""
+    """Validate a message against a schema definition.
+
+    Args:
+        schema_type (str): Schema type, e.g. 'AVRO' or 'PROTOCOL_BUFFER'.
+        definition (str): Schema definition string used for validation.
+        message_bytes (bytes): Raw message bytes to validate.
+        encoding (str): Message encoding, e.g. 'JSON', 'BINARY', or 'ENCODING_UNSPECIFIED'.
+
+    Returns:
+        str | None: An error message describing the validation failure, or None if valid.
+    """
     if schema_type == "AVRO":
         if encoding in ("JSON", "ENCODING_UNSPECIFIED"):
             try:

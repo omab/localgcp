@@ -23,10 +23,23 @@ add_request_logging(app, "scheduler")
 
 
 def _now() -> str:
+    """Return the current UTC timestamp in ISO 8601 format with second precision.
+
+    Returns:
+        str: Current UTC time formatted as 'YYYY-MM-DDTHH:MM:SSZ'.
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _job_id(full_name: str) -> str:
+    """Extract the job ID from a full resource name.
+
+    Args:
+        full_name (str): Full job resource name such as 'projects/p/locations/l/jobs/my-job'.
+
+    Returns:
+        str: The last path component, which is the job ID.
+    """
     return full_name.rsplit("/", 1)[-1]
 
 
@@ -37,7 +50,19 @@ def _job_id(full_name: str) -> str:
 
 @app.post("/v1/projects/{project}/locations/{location}/jobs", status_code=200)
 async def create_job(project: str, location: str, request: Request):
-    """Create a new Cloud Scheduler job."""
+    """Create a new Cloud Scheduler job.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        request (Request): HTTP request body with name, schedule, timeZone, httpTarget, etc.
+
+    Returns:
+        dict: The newly created JobModel dict.
+
+    Raises:
+        GCPError: If name is missing (400) or the job already exists (409).
+    """
     body = await request.json()
     name_field = body.get("name", "")
     # Derive job ID from name or generate from body
@@ -70,7 +95,19 @@ async def create_job(project: str, location: str, request: Request):
 
 @app.get("/v1/projects/{project}/locations/{location}/jobs/{job_id}")
 async def get_job(project: str, location: str, job_id: str):
-    """Get a Cloud Scheduler job by ID."""
+    """Get a Cloud Scheduler job by ID.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        job_id (str): Job resource ID.
+
+    Returns:
+        dict: The JobModel dict for the requested job.
+
+    Raises:
+        GCPError: If the job does not exist (404).
+    """
     full_name = f"projects/{project}/locations/{location}/jobs/{job_id}"
     store = sched_store.get_store()
     data = store.get("jobs", full_name)
@@ -81,7 +118,17 @@ async def get_job(project: str, location: str, job_id: str):
 
 @app.get("/v1/projects/{project}/locations/{location}/jobs")
 async def list_jobs(project: str, location: str, pageSize: int = 100, pageToken: str = ""):
-    """List Cloud Scheduler jobs for a project and location."""
+    """List Cloud Scheduler jobs for a project and location.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        pageSize (int): Maximum number of jobs to return per page.
+        pageToken (str): Pagination token from a previous response.
+
+    Returns:
+        dict: JobListResponse with jobs and optional nextPageToken.
+    """
     store = sched_store.get_store()
     prefix = f"projects/{project}/locations/{location}/jobs/"
     items = [JobModel(**v) for v in store.list("jobs") if v["name"].startswith(prefix)]
@@ -93,7 +140,20 @@ async def list_jobs(project: str, location: str, pageSize: int = 100, pageToken:
 
 @app.patch("/v1/projects/{project}/locations/{location}/jobs/{job_id}")
 async def update_job(project: str, location: str, job_id: str, request: Request):
-    """Update fields of an existing Cloud Scheduler job."""
+    """Update fields of an existing Cloud Scheduler job.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        job_id (str): Job resource ID.
+        request (Request): HTTP request body with fields to update.
+
+    Returns:
+        dict: The updated JobModel dict.
+
+    Raises:
+        GCPError: If the job does not exist (404).
+    """
     full_name = f"projects/{project}/locations/{location}/jobs/{job_id}"
     store = sched_store.get_store()
     existing = store.get("jobs", full_name)
@@ -113,7 +173,19 @@ async def update_job(project: str, location: str, job_id: str, request: Request)
 
 @app.delete("/v1/projects/{project}/locations/{location}/jobs/{job_id}", status_code=204)
 async def delete_job(project: str, location: str, job_id: str):
-    """Delete a Cloud Scheduler job."""
+    """Delete a Cloud Scheduler job.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        job_id (str): Job resource ID.
+
+    Returns:
+        Response: HTTP 204 No Content response.
+
+    Raises:
+        GCPError: If the job does not exist (404).
+    """
     full_name = f"projects/{project}/locations/{location}/jobs/{job_id}"
     store = sched_store.get_store()
     if not store.delete("jobs", full_name):
@@ -128,7 +200,19 @@ async def delete_job(project: str, location: str, job_id: str):
 
 @app.post("/v1/projects/{project}/locations/{location}/jobs/{job_id}:run")
 async def run_job(project: str, location: str, job_id: str):
-    """Force-run a job immediately, regardless of schedule."""
+    """Force-run a job immediately, regardless of its schedule.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        job_id (str): Job resource ID.
+
+    Returns:
+        dict: The updated JobModel dict with lastAttemptTime and status populated.
+
+    Raises:
+        GCPError: If the job does not exist (404).
+    """
     from cloudbox.services.scheduler.worker import _dispatch
 
     full_name = f"projects/{project}/locations/{location}/jobs/{job_id}"
@@ -156,7 +240,19 @@ async def run_job(project: str, location: str, job_id: str):
 
 @app.post("/v1/projects/{project}/locations/{location}/jobs/{job_id}:pause")
 async def pause_job(project: str, location: str, job_id: str):
-    """Pause a Cloud Scheduler job, preventing future dispatches."""
+    """Pause a Cloud Scheduler job, preventing future dispatches.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        job_id (str): Job resource ID.
+
+    Returns:
+        dict: The updated JobModel dict with state PAUSED.
+
+    Raises:
+        GCPError: If the job does not exist (404).
+    """
     full_name = f"projects/{project}/locations/{location}/jobs/{job_id}"
     store = sched_store.get_store()
     data = store.get("jobs", full_name)
@@ -169,7 +265,19 @@ async def pause_job(project: str, location: str, job_id: str):
 
 @app.post("/v1/projects/{project}/locations/{location}/jobs/{job_id}:resume")
 async def resume_job(project: str, location: str, job_id: str):
-    """Resume a paused Cloud Scheduler job."""
+    """Resume a paused Cloud Scheduler job.
+
+    Args:
+        project (str): GCP project ID.
+        location (str): GCP region.
+        job_id (str): Job resource ID.
+
+    Returns:
+        dict: The updated JobModel dict with state ENABLED.
+
+    Raises:
+        GCPError: If the job does not exist (404).
+    """
     full_name = f"projects/{project}/locations/{location}/jobs/{job_id}"
     store = sched_store.get_store()
     data = store.get("jobs", full_name)

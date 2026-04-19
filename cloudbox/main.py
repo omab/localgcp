@@ -35,6 +35,12 @@ _SERVICES = [
 
 
 def _build_configs() -> list[tuple[str, uvicorn.Config]]:
+    """Build a uvicorn Config for every registered service.
+
+    Returns:
+        list[tuple[str, uvicorn.Config]]: Pairs of (service name, uvicorn Config)
+            in the same order as _SERVICES.
+    """
     from cloudbox.admin.app import app as admin_app
     from cloudbox.services.bigquery.app import app as bigquery_app
     from cloudbox.services.firestore.app import app as firestore_app
@@ -119,6 +125,12 @@ def _build_configs() -> list[tuple[str, uvicorn.Config]]:
 
 
 async def _serve_all(configs: list[tuple[str, uvicorn.Config]]) -> None:
+    """Start all HTTP servers, the Pub/Sub gRPC server, and the Scheduler worker.
+
+    Args:
+        configs (list[tuple[str, uvicorn.Config]]): Service name / uvicorn Config
+            pairs as returned by _build_configs.
+    """
     servers = [uvicorn.Server(cfg) for _, cfg in configs]
 
     # Build and start the Pub/Sub gRPC server

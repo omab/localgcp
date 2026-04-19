@@ -29,10 +29,23 @@ _POLL_INTERVAL = 30  # seconds
 
 
 def _now_utc() -> datetime:
+    """Return the current UTC datetime.
+
+    Returns:
+        datetime: Current time as a timezone-aware UTC datetime.
+    """
     return datetime.now(UTC)
 
 
 def _parse_dt(s: str) -> datetime | None:
+    """Parse an ISO 8601 string to a timezone-aware UTC datetime.
+
+    Args:
+        s (str): ISO 8601 datetime string, optionally ending with 'Z'.
+
+    Returns:
+        datetime | None: Parsed UTC datetime, or None if the string is empty or invalid.
+    """
     if not s:
         return None
     try:
@@ -44,7 +57,14 @@ def _parse_dt(s: str) -> datetime | None:
 
 
 def _parse_duration_s(s: str) -> float:
-    """Parse a duration string like '5s', '30m', '1h', '1h30m' to seconds."""
+    """Parse a duration string like '5s', '30m', '1h', or '1h30m' to seconds.
+
+    Args:
+        s (str): Duration string using h/m/s unit suffixes.
+
+    Returns:
+        float: Total duration in seconds, or 0.0 if the string is empty or '0s'.
+    """
     s = s.strip()
     if not s or s == "0s":
         return 0.0
@@ -63,7 +83,16 @@ def _parse_duration_s(s: str) -> float:
 
 
 def _retry_backoff(retry_config: dict, attempt: int) -> float:
-    """Return seconds to wait before retry attempt N (1-based)."""
+    """Return seconds to wait before retry attempt N (1-based).
+
+    Args:
+        retry_config (dict): Job retryConfig dict with minBackoffDuration, maxBackoffDuration,
+            and maxDoublings.
+        attempt (int): 1-based retry attempt number.
+
+    Returns:
+        float: Seconds to wait before the retry, capped at maxBackoffDuration.
+    """
     min_b = _parse_duration_s(retry_config.get("minBackoffDuration", "5s"))
     max_b = _parse_duration_s(retry_config.get("maxBackoffDuration", "3600s"))
     doublings = int(retry_config.get("maxDoublings", 5))
@@ -72,7 +101,16 @@ def _retry_backoff(retry_config: dict, attempt: int) -> float:
 
 
 def _is_due(schedule: str, last_attempt: str, now: datetime) -> bool:
-    """Return True if the job's schedule has fired since the last attempt."""
+    """Return True if the job's schedule has fired since the last attempt.
+
+    Args:
+        schedule (str): Cron expression for the job schedule.
+        last_attempt (str): ISO 8601 timestamp of the last attempt, or empty string.
+        now (datetime): Current UTC datetime to compare against.
+
+    Returns:
+        bool: True if the next scheduled occurrence after last_attempt is at or before now.
+    """
     try:
         last = _parse_dt(last_attempt)
         if last is None:
@@ -86,7 +124,15 @@ def _is_due(schedule: str, last_attempt: str, now: datetime) -> bool:
 
 
 def _next_run_time(schedule: str, base: datetime) -> str:
-    """Return ISO string of the next scheduled time after base."""
+    """Return ISO string of the next scheduled time after base.
+
+    Args:
+        schedule (str): Cron expression for the job schedule.
+        base (datetime): Reference datetime to compute the next occurrence from.
+
+    Returns:
+        str: ISO 8601 UTC timestamp of the next run, or empty string if schedule is invalid.
+    """
     try:
         cron = croniter(schedule, base)
         nxt = cron.get_next(datetime).replace(tzinfo=UTC)
@@ -96,7 +142,10 @@ def _next_run_time(schedule: str, base: datetime) -> str:
 
 
 async def dispatch_loop() -> None:
-    """Run forever, dispatching jobs that are due."""
+    """Run forever, dispatching jobs that are due.
+
+    Starts an httpx AsyncClient and calls _tick every _POLL_INTERVAL seconds until cancelled.
+    """
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
@@ -107,6 +156,11 @@ async def dispatch_loop() -> None:
 
 
 async def _tick(client: httpx.AsyncClient) -> None:
+    """Process one scheduler poll: dispatch all ENABLED jobs that are due.
+
+    Args:
+        client (httpx.AsyncClient): Shared HTTP client used for job dispatch.
+    """
     store = get_store()
     now = _now_utc()
     now_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -160,7 +214,13 @@ async def _tick(client: httpx.AsyncClient) -> None:
 
 
 def _schedule_retry(job: dict, current_attempt: int, now: datetime) -> None:
-    """Set retry state on the job dict, or clear it if retries are exhausted."""
+    """Set retry state on the job dict, or clear it if retries are exhausted.
+
+    Args:
+        job (dict): Job data dict, mutated in place with retry state fields.
+        current_attempt (int): Zero-based index of the attempt that just failed.
+        now (datetime): Current UTC datetime used to compute the next retry time.
+    """
     retry_config = job.get("retryConfig", {})
     max_retries = int(retry_config.get("retryCount", 0))
 
@@ -192,11 +252,26 @@ def _schedule_retry(job: dict, current_attempt: int, now: datetime) -> None:
 
 
 def _clear_retry_state(job: dict) -> None:
+    """Remove all ephemeral retry state fields from a job dict.
+
+    Args:
+        job (dict): Job data dict, mutated in place to remove _retryAttempt,
+            _nextRetryTime, and _retryStartTime keys.
+    """
     for key in ("_retryAttempt", "_nextRetryTime", "_retryStartTime"):
         job.pop(key, None)
 
 
 async def _dispatch(client: httpx.AsyncClient, http_target: dict) -> None:
+    """Send an HTTP request for a scheduled job's httpTarget.
+
+    Args:
+        client (httpx.AsyncClient): Shared HTTP client used for the request.
+        http_target (dict): Job httpTarget dict containing uri, httpMethod, headers, and body.
+
+    Raises:
+        RuntimeError: If the response status code is 400 or higher.
+    """
     uri = http_target.get("uri", "")
     method = http_target.get("httpMethod", "POST")
     headers = dict(http_target.get("headers", {}))

@@ -55,6 +55,11 @@ logger = logging.getLogger("cloudbox.pubsub")
 
 
 def _now() -> str:
+    """Return the current UTC time as an ISO 8601 string with millisecond precision.
+
+    Returns:
+        str: Current UTC timestamp formatted as 'YYYY-MM-DDTHH:MM:SS.mmmZ'.
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
@@ -62,11 +67,17 @@ async def _dispatch_push(push_endpoint: str, sub_name: str, ack_id: str, message
     """POST a message to a push subscription's endpoint.
 
     The payload matches the GCP Pub/Sub push message format:
-        {"message": {...}, "subscription": "projects/.../subscriptions/..."}
+    {"message": {...}, "subscription": "projects/.../subscriptions/..."}.
 
     A 2xx response from the endpoint is treated as an acknowledgement (ack).
     Non-2xx responses and connection errors nack the message by setting its
     ack deadline to 0, making it immediately eligible for redelivery.
+
+    Args:
+        push_endpoint (str): HTTP URL to POST the message to.
+        sub_name (str): Full subscription resource name.
+        ack_id (str): Ack ID of the message being delivered.
+        message (dict): PubsubMessage dict to deliver as the push payload.
     """
     payload = {"message": message, "subscription": sub_name}
     try:
@@ -83,7 +94,17 @@ async def _dispatch_push(push_endpoint: str, sub_name: str, ack_id: str, message
 
 
 def _parse_bq_table_ref(table_ref: str) -> tuple[str, str, str] | None:
-    """Parse 'project:dataset.table' or 'project.dataset.table' → (project, dataset, table)."""
+    """Parse a BigQuery table reference into its component parts.
+
+    Accepts both 'project:dataset.table' and 'project.dataset.table' formats.
+
+    Args:
+        table_ref (str): BigQuery table reference string.
+
+    Returns:
+        tuple[str, str, str] | None: A (project, dataset, table) tuple, or None if the
+        reference could not be parsed.
+    """
     normalized = table_ref.replace(":", ".", 1)
     parts = normalized.split(".")
     if len(parts) == 3:
@@ -92,7 +113,15 @@ def _parse_bq_table_ref(table_ref: str) -> tuple[str, str, str] | None:
 
 
 async def _write_to_bigquery(sub_data: dict, msg: dict) -> None:
-    """Insert a Pub/Sub message into a BigQuery table."""
+    """Insert a Pub/Sub message into a BigQuery table.
+
+    Uses the subscription's bigqueryConfig to determine the target table and
+    encoding options (useTopicSchema, writeMetadata, dropUnknownFields).
+
+    Args:
+        sub_data (dict): Subscription resource dict containing bigqueryConfig.
+        msg (dict): PubsubMessage dict to insert as a BigQuery row.
+    """
     from cloudbox.services.bigquery.engine import get_engine
 
     bq_cfg = sub_data.get("bigqueryConfig") or {}
@@ -140,7 +169,15 @@ async def _write_to_bigquery(sub_data: dict, msg: dict) -> None:
 
 
 async def _write_to_gcs(sub_data: dict, msg: dict) -> None:
-    """Write a Pub/Sub message as a Cloud Storage object."""
+    """Write a Pub/Sub message as a Cloud Storage object.
+
+    Uses the subscription's cloudStorageConfig to determine the target bucket,
+    filename pattern, and whether to use Avro or raw-bytes format.
+
+    Args:
+        sub_data (dict): Subscription resource dict containing cloudStorageConfig.
+        msg (dict): PubsubMessage dict to write as a GCS object.
+    """
     import hashlib
 
     from cloudbox.services.gcs.models import ObjectModel
@@ -214,7 +251,16 @@ async def _write_to_gcs(sub_data: dict, msg: dict) -> None:
 
 @app.put("/v1/projects/{project}/topics/{topic_id}")
 async def create_topic(project: str, topic_id: str, body: CreateTopicBody | None = None):
-    """Create a Pub/Sub topic, or return the existing one if it already exists."""
+    """Create a Pub/Sub topic, or return the existing one if it already exists.
+
+    Args:
+        project (str): GCP project ID.
+        topic_id (str): Topic ID to create.
+        body (CreateTopicBody | None): Optional topic configuration.
+
+    Returns:
+        dict: The created or existing topic resource dict.
+    """
     full_name = f"projects/{project}/topics/{topic_id}"
     store = ps_store.get_store()
     existing = store.get("topics", full_name)
@@ -235,7 +281,16 @@ async def create_topic(project: str, topic_id: str, body: CreateTopicBody | None
 
 @app.patch("/v1/projects/{project}/topics/{topic_id}")
 async def update_topic(project: str, topic_id: str, body: CreateTopicBody | None = None):
-    """Update a Pub/Sub topic's labels, schema settings, or retention duration."""
+    """Update a Pub/Sub topic's labels, schema settings, or retention duration.
+
+    Args:
+        project (str): GCP project ID.
+        topic_id (str): Topic ID to update.
+        body (CreateTopicBody | None): Fields to update on the topic.
+
+    Returns:
+        dict: The updated topic resource dict.
+    """
     full_name = f"projects/{project}/topics/{topic_id}"
     store = ps_store.get_store()
     data = store.get("topics", full_name)
@@ -257,7 +312,15 @@ async def update_topic(project: str, topic_id: str, body: CreateTopicBody | None
 
 @app.get("/v1/projects/{project}/topics/{topic_id}")
 async def get_topic(project: str, topic_id: str):
-    """Get a Pub/Sub topic by ID."""
+    """Get a Pub/Sub topic by ID.
+
+    Args:
+        project (str): GCP project ID.
+        topic_id (str): Topic ID to retrieve.
+
+    Returns:
+        dict: The topic resource dict.
+    """
     full_name = f"projects/{project}/topics/{topic_id}"
     store = ps_store.get_store()
     data = store.get("topics", full_name)
@@ -268,7 +331,16 @@ async def get_topic(project: str, topic_id: str):
 
 @app.get("/v1/projects/{project}/topics")
 async def list_topics(project: str, pageSize: int = 100, pageToken: str = ""):
-    """List all Pub/Sub topics in a project with optional pagination."""
+    """List all Pub/Sub topics in a project with optional pagination.
+
+    Args:
+        project (str): GCP project ID.
+        pageSize (int): Maximum number of topics to return per page.
+        pageToken (str): Pagination token from a previous response.
+
+    Returns:
+        dict: TopicListResponse dict with 'topics' and optional 'nextPageToken'.
+    """
     store = ps_store.get_store()
     prefix = f"projects/{project}/topics/"
     items = [
@@ -284,7 +356,15 @@ async def list_topics(project: str, pageSize: int = 100, pageToken: str = ""):
 
 @app.delete("/v1/projects/{project}/topics/{topic_id}", status_code=204)
 async def delete_topic(project: str, topic_id: str):
-    """Delete a Pub/Sub topic and remove all associated subscriptions."""
+    """Delete a Pub/Sub topic and remove all associated subscriptions.
+
+    Args:
+        project (str): GCP project ID.
+        topic_id (str): Topic ID to delete.
+
+    Returns:
+        Response: HTTP 204 No Content response.
+    """
     full_name = f"projects/{project}/topics/{topic_id}"
     store = ps_store.get_store()
     if not store.delete("topics", full_name):
@@ -301,7 +381,17 @@ async def delete_topic(project: str, topic_id: str):
 async def publish(
     project: str, topic_id: str, body: PublishRequest, background_tasks: BackgroundTasks
 ):
-    """Publish messages to a topic, fanning out to all subscriptions."""
+    """Publish messages to a topic, fanning out to all subscriptions.
+
+    Args:
+        project (str): GCP project ID.
+        topic_id (str): Topic ID to publish to.
+        body (PublishRequest): Request body containing the list of messages to publish.
+        background_tasks (BackgroundTasks): FastAPI background task queue for push dispatch.
+
+    Returns:
+        dict: PublishResponse dict containing 'messageIds' for the published messages.
+    """
     full_name = f"projects/{project}/topics/{topic_id}"
     store = ps_store.get_store()
     if not store.exists("topics", full_name):
@@ -379,7 +469,16 @@ async def publish(
 
 @app.put("/v1/projects/{project}/subscriptions/{sub_id}")
 async def create_subscription(project: str, sub_id: str, body: SubscriptionModel):
-    """Create a Pub/Sub subscription for an existing topic."""
+    """Create a Pub/Sub subscription for an existing topic.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID to create.
+        body (SubscriptionModel): Subscription configuration including the topic name.
+
+    Returns:
+        dict: The created subscription resource dict.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     existing = store.get("subscriptions", full_name)
@@ -408,7 +507,15 @@ async def create_subscription(project: str, sub_id: str, body: SubscriptionModel
 
 @app.get("/v1/projects/{project}/subscriptions/{sub_id}")
 async def get_subscription(project: str, sub_id: str):
-    """Get a Pub/Sub subscription by ID."""
+    """Get a Pub/Sub subscription by ID.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID to retrieve.
+
+    Returns:
+        dict: The subscription resource dict.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     data = store.get("subscriptions", full_name)
@@ -419,7 +526,16 @@ async def get_subscription(project: str, sub_id: str):
 
 @app.get("/v1/projects/{project}/subscriptions")
 async def list_subscriptions(project: str, pageSize: int = 100, pageToken: str = ""):
-    """List all subscriptions in a project with optional pagination."""
+    """List all subscriptions in a project with optional pagination.
+
+    Args:
+        project (str): GCP project ID.
+        pageSize (int): Maximum number of subscriptions to return per page.
+        pageToken (str): Pagination token from a previous response.
+
+    Returns:
+        dict: SubscriptionListResponse dict with 'subscriptions' and optional 'nextPageToken'.
+    """
     store = ps_store.get_store()
     prefix = f"projects/{project}/subscriptions/"
     items = [
@@ -435,7 +551,15 @@ async def list_subscriptions(project: str, pageSize: int = 100, pageToken: str =
 
 @app.delete("/v1/projects/{project}/subscriptions/{sub_id}", status_code=204)
 async def delete_subscription(project: str, sub_id: str):
-    """Delete a Pub/Sub subscription and its message queue."""
+    """Delete a Pub/Sub subscription and its message queue.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID to delete.
+
+    Returns:
+        Response: HTTP 204 No Content response.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     if not store.delete("subscriptions", full_name):
@@ -446,7 +570,16 @@ async def delete_subscription(project: str, sub_id: str):
 
 @app.post("/v1/projects/{project}/subscriptions/{sub_id}:pull")
 async def pull_messages(project: str, sub_id: str, body: PullRequest):
-    """Pull up to maxMessages from a pull subscription's queue."""
+    """Pull up to maxMessages from a pull subscription's queue.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID to pull from.
+        body (PullRequest): Request body specifying the maximum number of messages to pull.
+
+    Returns:
+        dict: PullResponse dict containing 'receivedMessages'.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     sub_data = store.get("subscriptions", full_name)
@@ -476,7 +609,16 @@ async def pull_messages(project: str, sub_id: str, body: PullRequest):
 
 @app.post("/v1/projects/{project}/subscriptions/{sub_id}:acknowledge")
 async def acknowledge(project: str, sub_id: str, body: AcknowledgeRequest):
-    """Acknowledge receipt of messages, removing them from the subscription queue."""
+    """Acknowledge receipt of messages, removing them from the subscription queue.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID whose messages are being acknowledged.
+        body (AcknowledgeRequest): Request body containing the list of ack IDs to acknowledge.
+
+    Returns:
+        dict: Empty dict on success.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     if not store.exists("subscriptions", full_name):
@@ -487,7 +629,16 @@ async def acknowledge(project: str, sub_id: str, body: AcknowledgeRequest):
 
 @app.post("/v1/projects/{project}/subscriptions/{sub_id}:modifyAckDeadline")
 async def modify_ack_deadline(project: str, sub_id: str, body: ModifyAckDeadlineRequest):
-    """Extend or reduce the ack deadline for a set of messages."""
+    """Extend or reduce the ack deadline for a set of messages.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID owning the messages.
+        body (ModifyAckDeadlineRequest): Request body with ack IDs and the new deadline in seconds.
+
+    Returns:
+        dict: Empty dict on success.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     if not store.exists("subscriptions", full_name):
@@ -498,7 +649,16 @@ async def modify_ack_deadline(project: str, sub_id: str, body: ModifyAckDeadline
 
 @app.post("/v1/projects/{project}/subscriptions/{sub_id}:seek")
 async def seek(project: str, sub_id: str, body: SeekRequest):
-    """Reset a subscription's position to a snapshot or timestamp."""
+    """Reset a subscription's position to a snapshot or timestamp.
+
+    Args:
+        project (str): GCP project ID.
+        sub_id (str): Subscription ID to seek.
+        body (SeekRequest): Request body specifying either a snapshot name or an RFC 3339 timestamp.
+
+    Returns:
+        dict: Empty dict on success.
+    """
     full_name = f"projects/{project}/subscriptions/{sub_id}"
     store = ps_store.get_store()
     sub_data = store.get("subscriptions", full_name)
@@ -528,7 +688,16 @@ async def seek(project: str, sub_id: str, body: SeekRequest):
 
 @app.put("/v1/projects/{project}/snapshots/{snap_id}")
 async def create_snapshot(project: str, snap_id: str, body: CreateSnapshotRequest):
-    """Create a snapshot of a subscription's current state."""
+    """Create a snapshot of a subscription's current state.
+
+    Args:
+        project (str): GCP project ID.
+        snap_id (str): Snapshot ID to create.
+        body (CreateSnapshotRequest): Request body with the subscription name and optional labels.
+
+    Returns:
+        dict: The created snapshot resource dict.
+    """
     snap_name = f"projects/{project}/snapshots/{snap_id}"
     store = ps_store.get_store()
     if not store.exists("subscriptions", body.subscription):
@@ -544,7 +713,15 @@ async def create_snapshot(project: str, snap_id: str, body: CreateSnapshotReques
 
 @app.get("/v1/projects/{project}/snapshots/{snap_id}")
 async def get_snapshot(project: str, snap_id: str):
-    """Get a Pub/Sub snapshot by ID."""
+    """Get a Pub/Sub snapshot by ID.
+
+    Args:
+        project (str): GCP project ID.
+        snap_id (str): Snapshot ID to retrieve.
+
+    Returns:
+        dict: The snapshot resource dict.
+    """
     snap_name = f"projects/{project}/snapshots/{snap_id}"
     store = ps_store.get_store()
     data = store.get("snapshots", snap_name)
@@ -555,7 +732,16 @@ async def get_snapshot(project: str, snap_id: str):
 
 @app.get("/v1/projects/{project}/snapshots")
 async def list_snapshots(project: str, pageSize: int = 100, pageToken: str = ""):
-    """List all snapshots in a project with optional pagination."""
+    """List all snapshots in a project with optional pagination.
+
+    Args:
+        project (str): GCP project ID.
+        pageSize (int): Maximum number of snapshots to return per page.
+        pageToken (str): Pagination token from a previous response.
+
+    Returns:
+        dict: SnapshotListResponse dict with 'snapshots' and optional 'nextPageToken'.
+    """
     store = ps_store.get_store()
     prefix = f"projects/{project}/snapshots/"
     items = [SnapshotModel(**v) for v in store.list("snapshots") if v["name"].startswith(prefix)]
@@ -569,7 +755,16 @@ async def list_snapshots(project: str, pageSize: int = 100, pageToken: str = "")
 
 @app.patch("/v1/projects/{project}/snapshots/{snap_id}")
 async def update_snapshot(project: str, snap_id: str, body: SnapshotModel):
-    """Update a snapshot's labels or expiry time."""
+    """Update a snapshot's labels or expiry time.
+
+    Args:
+        project (str): GCP project ID.
+        snap_id (str): Snapshot ID to update.
+        body (SnapshotModel): Fields to update on the snapshot.
+
+    Returns:
+        dict: The updated snapshot resource dict.
+    """
     snap_name = f"projects/{project}/snapshots/{snap_id}"
     store = ps_store.get_store()
     data = store.get("snapshots", snap_name)
@@ -585,7 +780,15 @@ async def update_snapshot(project: str, snap_id: str, body: SnapshotModel):
 
 @app.delete("/v1/projects/{project}/snapshots/{snap_id}", status_code=204)
 async def delete_snapshot(project: str, snap_id: str):
-    """Delete a Pub/Sub snapshot."""
+    """Delete a Pub/Sub snapshot.
+
+    Args:
+        project (str): GCP project ID.
+        snap_id (str): Snapshot ID to delete.
+
+    Returns:
+        Response: HTTP 204 No Content response.
+    """
     snap_name = f"projects/{project}/snapshots/{snap_id}"
     store = ps_store.get_store()
     if not store.delete("snapshots", snap_name):
@@ -600,7 +803,16 @@ async def delete_snapshot(project: str, snap_id: str):
 
 @app.post("/v1/projects/{project}/schemas")
 async def create_schema(project: str, body: SchemaModel, schemaId: str = ""):
-    """Create a Pub/Sub schema (Avro or Protocol Buffer) for message validation."""
+    """Create a Pub/Sub schema (Avro or Protocol Buffer) for message validation.
+
+    Args:
+        project (str): GCP project ID.
+        body (SchemaModel): Schema definition including type and definition string.
+        schemaId (str): Optional schema ID; falls back to the name field in body if omitted.
+
+    Returns:
+        dict: The created schema resource dict.
+    """
     store = ps_store.get_store()
     schema_id = schemaId or body.name.split("/")[-1] if body.name else ""
     if not schema_id:
@@ -625,7 +837,15 @@ async def create_schema(project: str, body: SchemaModel, schemaId: str = ""):
 
 @app.get("/v1/projects/{project}/schemas/{schema_id}")
 async def get_schema(project: str, schema_id: str):
-    """Get a Pub/Sub schema by ID."""
+    """Get a Pub/Sub schema by ID.
+
+    Args:
+        project (str): GCP project ID.
+        schema_id (str): Schema ID to retrieve.
+
+    Returns:
+        dict: The schema resource dict.
+    """
     full_name = f"projects/{project}/schemas/{schema_id}"
     store = ps_store.get_store()
     data = store.get("schemas", full_name)
@@ -636,7 +856,16 @@ async def get_schema(project: str, schema_id: str):
 
 @app.get("/v1/projects/{project}/schemas")
 async def list_schemas(project: str, pageSize: int = 100, pageToken: str = ""):
-    """List all schemas in a project with optional pagination."""
+    """List all schemas in a project with optional pagination.
+
+    Args:
+        project (str): GCP project ID.
+        pageSize (int): Maximum number of schemas to return per page.
+        pageToken (str): Pagination token from a previous response.
+
+    Returns:
+        dict: SchemaListResponse dict with 'schemas' and optional 'nextPageToken'.
+    """
     store = ps_store.get_store()
     prefix = f"projects/{project}/schemas/"
     items = [SchemaModel(**v) for v in store.list("schemas") if v["name"].startswith(prefix)]
@@ -648,7 +877,15 @@ async def list_schemas(project: str, pageSize: int = 100, pageToken: str = ""):
 
 @app.delete("/v1/projects/{project}/schemas/{schema_id}", status_code=204)
 async def delete_schema(project: str, schema_id: str):
-    """Delete a Pub/Sub schema."""
+    """Delete a Pub/Sub schema.
+
+    Args:
+        project (str): GCP project ID.
+        schema_id (str): Schema ID to delete.
+
+    Returns:
+        Response: HTTP 204 No Content response.
+    """
     full_name = f"projects/{project}/schemas/{schema_id}"
     store = ps_store.get_store()
     if not store.delete("schemas", full_name):
@@ -658,7 +895,15 @@ async def delete_schema(project: str, schema_id: str):
 
 @app.post("/v1/projects/{project}/schemas:validate")
 async def validate_schema_endpoint(project: str, body: ValidateSchemaRequest):
-    """Validate a schema definition without storing it."""
+    """Validate a schema definition without storing it.
+
+    Args:
+        project (str): GCP project ID.
+        body (ValidateSchemaRequest): Request body containing the schema to validate.
+
+    Returns:
+        dict: Empty dict on success.
+    """
     err = validate_schema_definition(body.schema_.type, body.schema_.definition)
     if err:
         raise GCPError(400, f"Invalid schema: {err}")
@@ -667,7 +912,15 @@ async def validate_schema_endpoint(project: str, body: ValidateSchemaRequest):
 
 @app.post("/v1/projects/{project}/schemas:validateMessage")
 async def validate_message_endpoint(project: str, body: ValidateMessageRequest):
-    """Validate a message against a schema definition or stored schema."""
+    """Validate a message against a schema definition or stored schema.
+
+    Args:
+        project (str): GCP project ID.
+        body (ValidateMessageRequest): Request body with the message and inline or named schema.
+
+    Returns:
+        dict: Empty dict on success.
+    """
     store = ps_store.get_store()
 
     # Resolve schema: inline or by resource name

@@ -16,6 +16,6 @@ def get_store() -> NamespacedStore:
     """Return the shared GCS store instance.
 
     Returns:
-        The module-level ``NamespacedStore`` used by all GCS route handlers.
+        NamespacedStore: Module-level store used by all GCS route handlers.
     """
     return _store

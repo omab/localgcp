@@ -26,9 +26,9 @@ class NamespacedStore:
         """Initialize the store.
 
         Args:
-            name: Service name used as the subdirectory for persistence.
-            data_dir: Root directory for JSON persistence.  Pass ``None``
-                (default) for in-memory-only mode.
+            name (str): Service name used as the subdirectory for persistence.
+            data_dir (str | None): Root directory for JSON persistence. Pass
+                None (default) for in-memory-only mode.
         """
         self._name = name
         self._data_dir = Path(data_dir) / name if data_dir else None
@@ -47,11 +47,11 @@ class NamespacedStore:
         """Retrieve a value by namespace and key.
 
         Args:
-            namespace: Logical partition within the store (e.g. ``"buckets"``).
-            key: Unique identifier within the namespace.
+            namespace (str): Logical partition within the store (e.g. "buckets").
+            key (str): Unique identifier within the namespace.
 
         Returns:
-            The stored value, or ``None`` if the key does not exist.
+            Any | None: The stored value, or None if the key does not exist.
         """
         with self._lock:
             return self._data.get(namespace, {}).get(key)
@@ -60,9 +60,9 @@ class NamespacedStore:
         """Store a value, creating the namespace if necessary.
 
         Args:
-            namespace: Logical partition within the store.
-            key: Unique identifier within the namespace.
-            value: JSON-serializable value to store.
+            namespace (str): Logical partition within the store.
+            key (str): Unique identifier within the namespace.
+            value (Any): JSON-serializable value to store.
         """
         with self._lock:
             self._data.setdefault(namespace, {})[key] = value
@@ -72,11 +72,11 @@ class NamespacedStore:
         """Delete a key from a namespace.
 
         Args:
-            namespace: Logical partition within the store.
-            key: Key to remove.
+            namespace (str): Logical partition within the store.
+            key (str): Key to remove.
 
         Returns:
-            ``True`` if the key existed and was removed, ``False`` otherwise.
+            bool: True if the key existed and was removed, False otherwise.
         """
         with self._lock:
             ns = self._data.get(namespace, {})
@@ -90,11 +90,11 @@ class NamespacedStore:
         """Check whether a key exists in a namespace.
 
         Args:
-            namespace: Logical partition within the store.
-            key: Key to check.
+            namespace (str): Logical partition within the store.
+            key (str): Key to check.
 
         Returns:
-            ``True`` if the key exists.
+            bool: True if the key exists, False otherwise.
         """
         with self._lock:
             return key in self._data.get(namespace, {})
@@ -103,10 +103,10 @@ class NamespacedStore:
         """Return all values in a namespace.
 
         Args:
-            namespace: Logical partition within the store.
+            namespace (str): Logical partition within the store.
 
         Returns:
-            A list of all stored values (order is insertion order).
+            list[Any]: All stored values in insertion order.
         """
         with self._lock:
             return list(self._data.get(namespace, {}).values())
@@ -115,10 +115,10 @@ class NamespacedStore:
         """Return all keys in a namespace.
 
         Args:
-            namespace: Logical partition within the store.
+            namespace (str): Logical partition within the store.
 
         Returns:
-            A list of all keys in insertion order.
+            list[str]: All keys in insertion order.
         """
         with self._lock:
             return list(self._data.get(namespace, {}).keys())
@@ -127,7 +127,7 @@ class NamespacedStore:
         """Remove all entries in a namespace.
 
         Args:
-            namespace: Logical partition to clear.
+            namespace (str): Logical partition to clear.
         """
         with self._lock:
             self._data.pop(namespace, None)
@@ -140,7 +140,11 @@ class NamespacedStore:
             self._persist()
 
     def stats(self) -> dict[str, int]:
-        """Return count per namespace."""
+        """Return count per namespace.
+
+        Returns:
+            dict[str, int]: Mapping of namespace name to the number of entries it contains.
+        """
         with self._lock:
             return {ns: len(keys) for ns, keys in self._data.items()}
 

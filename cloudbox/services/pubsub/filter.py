@@ -20,7 +20,14 @@ import shlex
 
 
 def _tokenize(expr: str) -> list[str]:
-    """Return a flat token list from the filter expression."""
+    """Return a flat token list from the filter expression.
+
+    Args:
+        expr (str): Raw filter expression string to tokenize.
+
+    Returns:
+        list[str]: Ordered list of tokens parsed from the expression.
+    """
     # Pad parentheses and commas so shlex splits them as separate tokens
     expr = re.sub(r"([(),])", r" \1 ", expr)
     tokens = shlex.split(expr)
@@ -30,32 +37,68 @@ def _tokenize(expr: str) -> list[str]:
 class _Parser:
     """Recursive-descent parser for the filter grammar."""
 
-    def __init__(self, tokens: list[str]):
+    def __init__(self, tokens: list[str]) -> None:
+        """Initialize the parser with a token list.
+
+        Args:
+            tokens (list[str]): Ordered list of tokens produced by _tokenize.
+        """
         self._tokens = tokens
         self._pos = 0
 
     def _peek(self) -> str | None:
+        """Return the current token without consuming it.
+
+        Returns:
+            str | None: Current token, or None if the token list is exhausted.
+        """
         if self._pos < len(self._tokens):
             return self._tokens[self._pos]
         return None
 
     def _consume(self) -> str:
+        """Consume and return the current token.
+
+        Returns:
+            str: The token at the current position.
+        """
         tok = self._tokens[self._pos]
         self._pos += 1
         return tok
 
     def _expect(self, val: str) -> None:
+        """Consume the current token and raise ValueError if it does not match val.
+
+        Args:
+            val (str): Expected token value.
+
+        Raises:
+            ValueError: If the current token does not equal val.
+        """
         tok = self._consume()
         if tok != val:
             raise ValueError(f"Expected {val!r}, got {tok!r}")
 
     def parse(self):
+        """Parse the token list into an AST and verify all tokens are consumed.
+
+        Returns:
+            tuple: AST node representing the full filter expression.
+
+        Raises:
+            ValueError: If tokens remain after the expression is fully parsed.
+        """
         node = self._parse_or()
         if self._pos != len(self._tokens):
             raise ValueError(f"Unexpected token: {self._tokens[self._pos]!r}")
         return node
 
     def _parse_or(self):
+        """Parse an OR expression.
+
+        Returns:
+            tuple: AST node for the OR expression or its left-hand sub-expression.
+        """
         left = self._parse_and()
         while self._peek() == "OR":
             self._consume()
@@ -64,6 +107,11 @@ class _Parser:
         return left
 
     def _parse_and(self):
+        """Parse an AND expression.
+
+        Returns:
+            tuple: AST node for the AND expression or its left-hand sub-expression.
+        """
         left = self._parse_not()
         while self._peek() == "AND":
             self._consume()
@@ -72,12 +120,25 @@ class _Parser:
         return left
 
     def _parse_not(self):
+        """Parse a NOT expression or delegate to atom parsing.
+
+        Returns:
+            tuple: AST node for the NOT expression or the inner atom.
+        """
         if self._peek() == "NOT":
             self._consume()
             return ("NOT", self._parse_atom())
         return self._parse_atom()
 
     def _parse_atom(self):
+        """Parse an atomic expression: parenthesized group, hasPrefix call, or equality check.
+
+        Returns:
+            tuple: AST node for the atom.
+
+        Raises:
+            ValueError: If the current token is not a recognized atom start.
+        """
         tok = self._peek()
         if tok == "(":
             self._consume()
@@ -97,6 +158,14 @@ class _Parser:
         raise ValueError(f"Unexpected token in filter: {tok!r}")
 
     def _parse_has_prefix(self):
+        """Parse a hasPrefix(attributes.KEY, PREFIX) call.
+
+        Returns:
+            tuple: AST node of the form ('HAS_PREFIX', key, prefix).
+
+        Raises:
+            ValueError: If the first argument is not an attributes.KEY reference.
+        """
         self._consume()  # 'hasPrefix'
         self._expect("(")
         attr = self._consume()
@@ -110,6 +179,18 @@ class _Parser:
 
 
 def _eval(node, attributes: dict[str, str]) -> bool:
+    """Evaluate an AST node against a message's attributes dict.
+
+    Args:
+        node (tuple): AST node produced by _Parser.parse().
+        attributes (dict[str, str]): Message attributes to evaluate against.
+
+    Returns:
+        bool: True if the node evaluates to true for the given attributes.
+
+    Raises:
+        ValueError: If the AST contains an unknown node kind.
+    """
     kind = node[0]
     if kind == "EQ":
         _, key, value = node
@@ -129,8 +210,15 @@ def _eval(node, attributes: dict[str, str]) -> bool:
 def matches(filter_expr: str, message: dict) -> bool:
     """Return True if the message matches the filter expression.
 
-    An empty filter matches everything.
-    Parse or evaluation errors are logged and treated as a match (fail-open).
+    An empty filter matches everything. Parse or evaluation errors are treated
+    as a match (fail-open) so messages are never silently dropped.
+
+    Args:
+        filter_expr (str): CEL-based filter expression string, or empty string to match all.
+        message (dict): PubsubMessage dict containing an 'attributes' key.
+
+    Returns:
+        bool: True if the message matches the filter, False otherwise.
     """
     if not filter_expr:
         return True

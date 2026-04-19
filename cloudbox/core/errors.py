@@ -27,7 +27,17 @@ _STATUS_MAP = {
 
 
 def gcp_error(http_status: int, message: str, status: str | None = None) -> JSONResponse:
-    """Return a GCP-format JSON error response."""
+    """Return a GCP-format JSON error response.
+
+    Args:
+        http_status (int): HTTP status code (e.g. 404, 409).
+        message (str): Human-readable error message included in the response body.
+        status (str | None): GCP status string (e.g. "NOT_FOUND"). Derived from
+            http_status when omitted.
+
+    Returns:
+        JSONResponse: A Starlette JSONResponse with the GCP error envelope.
+    """
     gcp_status = status or _STATUS_MAP.get(http_status, "UNKNOWN")
     return JSONResponse(
         status_code=http_status,
@@ -42,10 +52,10 @@ class GCPError(HTTPException):
         """Initialize GCPError.
 
         Args:
-            http_status: HTTP status code (e.g. 404, 409).
-            message: Human-readable error message included in the GCP error body.
-            status: GCP status string (e.g. ``"NOT_FOUND"``).  Derived from
-                ``http_status`` when omitted.
+            http_status (int): HTTP status code (e.g. 404, 409).
+            message (str): Human-readable error message included in the GCP error body.
+            status (str | None): GCP status string (e.g. "NOT_FOUND"). Derived from
+                http_status when omitted.
         """
         super().__init__(status_code=http_status, detail=message)
         self.gcp_status = status or _STATUS_MAP.get(http_status, "UNKNOWN")
@@ -53,7 +63,11 @@ class GCPError(HTTPException):
 
 
 def add_gcp_exception_handler(app) -> None:
-    """Register the GCPError and generic exception handlers on a FastAPI app."""
+    """Register the GCPError and generic exception handlers on a FastAPI app.
+
+    Args:
+        app (FastAPI): The FastAPI application instance to register handlers on.
+    """
     from fastapi.responses import JSONResponse
 
     @app.exception_handler(GCPError)

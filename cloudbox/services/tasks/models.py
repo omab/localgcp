@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 
 
 def _now() -> str:
+    """Return the current UTC timestamp in ISO 8601 format with millisecond precision.
+
+    Returns:
+        str: Current UTC time formatted as 'YYYY-MM-DDTHH:MM:SS.mmmZ'.
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 

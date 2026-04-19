@@ -15,6 +15,6 @@ def get_store() -> NamespacedStore:
     """Return the shared Cloud Tasks store instance.
 
     Returns:
-        The module-level ``NamespacedStore`` used by all Tasks route handlers.
+        NamespacedStore: The module-level store used by all Tasks route handlers.
     """
     return _store

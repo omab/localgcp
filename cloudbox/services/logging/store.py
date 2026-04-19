@@ -10,6 +10,6 @@ def get_store() -> NamespacedStore:
     """Return the shared Cloud Logging store instance.
 
     Returns:
-        The module-level ``NamespacedStore`` used by all Logging route handlers.
+        NamespacedStore: The module-level store used by all Logging route handlers.
     """
     return _store

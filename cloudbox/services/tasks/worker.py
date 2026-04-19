@@ -24,6 +24,15 @@ _semaphores: dict[str, tuple[int, asyncio.Semaphore]] = {}  # queue_name → (li
 
 
 def _get_semaphore(queue_name: str, max_concurrent: int) -> asyncio.Semaphore:
+    """Return (or create) a per-queue semaphore enforcing maxConcurrentDispatches.
+
+    Args:
+        queue_name (str): Full resource name of the queue.
+        max_concurrent (int): Maximum number of concurrent dispatches allowed.
+
+    Returns:
+        asyncio.Semaphore: A semaphore sized to max_concurrent for this queue.
+    """
     entry = _semaphores.get(queue_name)
     if entry is None or entry[0] != max_concurrent:
         sem = asyncio.Semaphore(max_concurrent)
@@ -33,10 +42,23 @@ def _get_semaphore(queue_name: str, max_concurrent: int) -> asyncio.Semaphore:
 
 
 def _now() -> str:
+    """Return the current UTC timestamp in ISO 8601 format with millisecond precision.
+
+    Returns:
+        str: Current UTC time formatted as 'YYYY-MM-DDTHH:MM:SS.mmmZ'.
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _parse_dt(s: str) -> datetime:
+    """Parse an ISO 8601 UTC datetime string to a timezone-aware datetime.
+
+    Args:
+        s (str): ISO 8601 string, with or without trailing 'Z' or fractional seconds.
+
+    Returns:
+        datetime: Parsed datetime with UTC timezone.
+    """
     s = s.rstrip("Z")
     if "." in s:
         return datetime.fromisoformat(s).replace(tzinfo=UTC)
@@ -44,7 +66,14 @@ def _parse_dt(s: str) -> datetime:
 
 
 def _parse_duration_s(s: str) -> float:
-    """Parse a Cloud Tasks duration string like '10s' or '0.5s' to seconds."""
+    """Parse a Cloud Tasks duration string like '10s' or '0.5s' to seconds.
+
+    Args:
+        s (str): Duration string ending in 's', such as '10s' or '0.5s'.
+
+    Returns:
+        float: Duration in seconds, or 0.1 if the string cannot be parsed.
+    """
     s = s.strip()
     if s.endswith("s"):
         try:
@@ -59,6 +88,13 @@ def _retry_delay(retry_config: dict, attempt: int) -> float:
 
     Uses exponential backoff: min_backoff * 2^min(attempt-1, max_doublings),
     capped at max_backoff.
+
+    Args:
+        retry_config (dict): Queue retryConfig dict with minBackoff, maxBackoff, maxDoublings.
+        attempt (int): Current dispatch attempt count (1-based).
+
+    Returns:
+        float: Seconds to wait before the next retry.
     """
     min_b = _parse_duration_s(retry_config.get("minBackoff", "0.1s"))
     max_b = _parse_duration_s(retry_config.get("maxBackoff", "3600s"))
@@ -69,7 +105,10 @@ def _retry_delay(retry_config: dict, attempt: int) -> float:
 
 
 async def dispatch_loop() -> None:
-    """Run forever, dispatching tasks that are ready."""
+    """Run forever, dispatching tasks that are ready.
+
+    Starts an httpx AsyncClient and calls _tick every second until cancelled.
+    """
     async with httpx.AsyncClient(timeout=30.0) as client:
         while True:
             try:
@@ -80,6 +119,11 @@ async def dispatch_loop() -> None:
 
 
 async def _tick(client: httpx.AsyncClient) -> None:
+    """Process one dispatch tick: find and launch all ready tasks in every RUNNING queue.
+
+    Args:
+        client (httpx.AsyncClient): Shared HTTP client used for task dispatch.
+    """
     store = get_store()
     now = datetime.now(UTC)
 
@@ -142,11 +186,30 @@ async def _dispatch_with_sem(
     http_req: dict,
     sem: asyncio.Semaphore,
 ) -> None:
+    """Acquire the semaphore then dispatch a task.
+
+    Args:
+        client (httpx.AsyncClient): Shared HTTP client used for task dispatch.
+        store (NamespacedStore): The Cloud Tasks store instance.
+        task_key (str): Store key for the task.
+        task (dict): Task data dict.
+        http_req (dict): HTTP request configuration from the task.
+        sem (asyncio.Semaphore): Semaphore limiting concurrent dispatches for the queue.
+    """
     async with sem:
         await _dispatch(client, store, task_key, task, http_req)
 
 
 async def _dispatch(client, store, task_key: str, task: dict, http_req: dict) -> None:
+    """Execute the HTTP request for a task, update attempt metadata, and handle retries.
+
+    Args:
+        client (httpx.AsyncClient): Shared HTTP client used for the request.
+        store (NamespacedStore): The Cloud Tasks store instance.
+        task_key (str): Store key for the task.
+        task (dict): Task data dict, mutated in place with attempt metadata.
+        http_req (dict): HTTP request configuration containing url, httpMethod, headers, body.
+    """
     url = http_req.get("url", "")
     method = http_req.get("httpMethod", "POST")
     headers = dict(http_req.get("headers", {}))

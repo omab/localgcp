@@ -16,6 +16,6 @@ def get_store() -> NamespacedStore:
     """Return the shared Secret Manager store instance.
 
     Returns:
-        The module-level ``NamespacedStore`` used by all Secret Manager route handlers.
+        NamespacedStore: The module-level store used by all Secret Manager route handlers.
     """
     return _store

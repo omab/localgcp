@@ -11,7 +11,13 @@ from starlette.responses import Response
 
 
 def add_request_logging(app: FastAPI, service_name: str) -> None:
-    """Attach request logging middleware and an unhandled-exception handler."""
+    """Attach request logging middleware and an unhandled-exception handler.
+
+    Args:
+        app (FastAPI): The FastAPI application to attach the middleware to.
+        service_name (str): Short service identifier used as the logger name suffix
+            (e.g. "gcs" produces logger "cloudbox.gcs").
+    """
     logger = logging.getLogger(f"cloudbox.{service_name}")
 
     class _Middleware(BaseHTTPMiddleware):

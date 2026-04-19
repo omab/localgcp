@@ -34,6 +34,11 @@ _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 def _get_services() -> dict:
+    """Collect stats and metadata for every registered service.
+
+    Returns:
+        dict: Mapping of service name to port, stats, and docs URL.
+    """
     from cloudbox.services.bigquery.engine import get_engine as bq_get_engine
     from cloudbox.services.firestore.store import get_store as firestore_store
     from cloudbox.services.gcs.store import get_store as gcs_store
@@ -127,13 +132,24 @@ def _get_services() -> dict:
 
 @app.get("/")
 async def dashboard(request: Request):
-    """Render the admin dashboard HTML page."""
+    """Render the admin dashboard HTML page.
+
+    Args:
+        request (Request): The incoming HTTP request.
+
+    Returns:
+        TemplateResponse: Rendered index.html template.
+    """
     return _TEMPLATES.TemplateResponse(request, "index.html")
 
 
 @app.get("/api/stats")
 async def api_stats():
-    """Return project name and per-service status summary."""
+    """Return project name and per-service status summary.
+
+    Returns:
+        JSONResponse: Project name and per-service stats keyed by service name.
+    """
     return JSONResponse(
         content={
             "project": settings.default_project,
@@ -147,7 +163,11 @@ async def api_stats():
 
 @app.get("/api/gcs/buckets")
 async def api_gcs_buckets():
-    """List all GCS buckets with object and notification counts."""
+    """List all GCS buckets with object and notification counts.
+
+    Returns:
+        list[dict]: Sorted list of bucket metadata including objectCount and notificationCount.
+    """
     from cloudbox.services.gcs.store import get_store
 
     store = get_store()
@@ -162,7 +182,14 @@ async def api_gcs_buckets():
 
 @app.get("/api/gcs/notifications")
 async def api_gcs_notifications(bucket: str = Query(...)):
-    """List notification configs for a GCS bucket."""
+    """List notification configs for a GCS bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        list[dict]: Notification configuration objects for the bucket.
+    """
     from cloudbox.services.gcs.store import get_store
 
     store = get_store()
@@ -177,7 +204,15 @@ async def api_gcs_notifications(bucket: str = Query(...)):
 
 @app.get("/api/gcs/download")
 async def api_gcs_download(bucket: str = Query(...), name: str = Query(...)):
-    """Download a GCS object as an attachment."""
+    """Download a GCS object as an attachment.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        name (str): Object name within the bucket.
+
+    Returns:
+        Response: Raw object bytes with content-disposition attachment header, or 404 JSON error.
+    """
     from cloudbox.services.gcs.store import get_store
 
     store = get_store()
@@ -197,7 +232,14 @@ async def api_gcs_download(bucket: str = Query(...), name: str = Query(...)):
 
 @app.get("/api/gcs/objects")
 async def api_gcs_objects(bucket: str = Query(...)):
-    """List all objects in a GCS bucket."""
+    """List all objects in a GCS bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        list[dict]: Sorted list of object metadata for the given bucket.
+    """
     from cloudbox.services.gcs.store import get_store
 
     store = get_store()
@@ -212,7 +254,14 @@ async def api_gcs_objects(bucket: str = Query(...)):
 
 @app.delete("/api/gcs/buckets")
 async def api_gcs_delete_bucket(bucket: str = Query(...)):
-    """Delete a GCS bucket and all its objects."""
+    """Delete a GCS bucket and all its objects.
+
+    Args:
+        bucket (str): Name of the GCS bucket to delete.
+
+    Returns:
+        dict: Confirmation with the deleted bucket name.
+    """
     from cloudbox.services.gcs.store import get_store
 
     store = get_store()
@@ -226,7 +275,15 @@ async def api_gcs_delete_bucket(bucket: str = Query(...)):
 
 @app.delete("/api/gcs/objects")
 async def api_gcs_delete_object(bucket: str = Query(...), name: str = Query(...)):
-    """Delete a single GCS object."""
+    """Delete a single GCS object.
+
+    Args:
+        bucket (str): Name of the GCS bucket containing the object.
+        name (str): Object name within the bucket.
+
+    Returns:
+        dict: Confirmation with the deleted object key.
+    """
     from cloudbox.services.gcs.store import get_store
 
     store = get_store()
@@ -241,7 +298,11 @@ async def api_gcs_delete_object(bucket: str = Query(...), name: str = Query(...)
 
 @app.get("/api/pubsub/topics")
 async def api_pubsub_topics():
-    """List all Pub/Sub topics with subscription and retained message counts."""
+    """List all Pub/Sub topics with subscription and retained message counts.
+
+    Returns:
+        list[dict]: Sorted list of topic metadata including subscriptionCount and retainedCount.
+    """
     from cloudbox.services.pubsub.store import get_store, retained_count
 
     store = get_store()
@@ -256,7 +317,11 @@ async def api_pubsub_topics():
 
 @app.get("/api/pubsub/subscriptions")
 async def api_pubsub_subscriptions():
-    """List all Pub/Sub subscriptions with queue depth and unacked message counts."""
+    """List all Pub/Sub subscriptions with queue depth and unacked message counts.
+
+    Returns:
+        list[dict]: Sorted list of subscription metadata including queueDepth and unackedCount.
+    """
     from cloudbox.services.pubsub.store import get_store, queue_depth, unacked_count
 
     store = get_store()
@@ -271,7 +336,14 @@ async def api_pubsub_subscriptions():
 
 @app.post("/api/pubsub/publish")
 async def api_pubsub_publish(request: Request):
-    """Publish a message to a topic via the admin UI."""
+    """Publish a message to a topic via the admin UI.
+
+    Args:
+        request (Request): JSON body with keys topic, data (str), and optional attributes (dict).
+
+    Returns:
+        dict: Published messageId and deliveredToSubscriptions count, or 404 JSON error.
+    """
     import uuid
     from datetime import datetime
 
@@ -309,7 +381,14 @@ async def api_pubsub_publish(request: Request):
 
 @app.delete("/api/pubsub/topics")
 async def api_pubsub_delete_topic(topic: str = Query(...)):
-    """Delete a Pub/Sub topic and all associated subscriptions."""
+    """Delete a Pub/Sub topic and all associated subscriptions.
+
+    Args:
+        topic (str): Full resource name of the topic to delete.
+
+    Returns:
+        dict: Confirmation with the deleted topic name.
+    """
     from cloudbox.services.pubsub.store import get_store, remove_queue
 
     store = get_store()
@@ -323,7 +402,14 @@ async def api_pubsub_delete_topic(topic: str = Query(...)):
 
 @app.delete("/api/pubsub/subscriptions")
 async def api_pubsub_delete_subscription(subscription: str = Query(...)):
-    """Delete a Pub/Sub subscription."""
+    """Delete a Pub/Sub subscription.
+
+    Args:
+        subscription (str): Full resource name of the subscription to delete.
+
+    Returns:
+        dict: Confirmation with the deleted subscription name.
+    """
     from cloudbox.services.pubsub.store import get_store, remove_queue
 
     store = get_store()
@@ -337,7 +423,11 @@ async def api_pubsub_delete_subscription(subscription: str = Query(...)):
 
 @app.get("/api/firestore/collections")
 async def api_firestore_collections():
-    """List all Firestore collections with document counts."""
+    """List all Firestore collections with document counts.
+
+    Returns:
+        list[dict]: Sorted list of collection names and their documentCount.
+    """
     from cloudbox.services.firestore.store import get_store
 
     store = get_store()
@@ -353,7 +443,14 @@ async def api_firestore_collections():
 
 @app.get("/api/firestore/documents")
 async def api_firestore_documents(collection: str = Query(...)):
-    """List all documents in a Firestore collection."""
+    """List all documents in a Firestore collection.
+
+    Args:
+        collection (str): Collection name to query.
+
+    Returns:
+        list[dict]: Documents in the collection, sorted by resource name.
+    """
     from cloudbox.services.firestore.store import get_store
 
     store = get_store()
@@ -371,7 +468,14 @@ async def api_firestore_documents(collection: str = Query(...)):
 
 @app.delete("/api/firestore/documents")
 async def api_firestore_delete_document(path: str = Query(...)):
-    """Delete a Firestore document by its resource path."""
+    """Delete a Firestore document by its resource path.
+
+    Args:
+        path (str): Full store key (resource path) of the document to delete.
+
+    Returns:
+        dict: Confirmation with the deleted path.
+    """
     from cloudbox.services.firestore.store import get_store
 
     get_store().delete("documents", path)
@@ -383,7 +487,11 @@ async def api_firestore_delete_document(path: str = Query(...)):
 
 @app.get("/api/secretmanager/secrets")
 async def api_sm_secrets():
-    """List all Secret Manager secrets with version counts."""
+    """List all Secret Manager secrets with version counts.
+
+    Returns:
+        list[dict]: Sorted list of secret metadata including versionCount.
+    """
     from cloudbox.services.secretmanager.store import get_store
 
     store = get_store()
@@ -397,7 +505,14 @@ async def api_sm_secrets():
 
 @app.get("/api/secretmanager/versions")
 async def api_sm_versions(secret: str = Query(...)):
-    """List versions for a secret identified by its short name (e.g. 'my-secret')."""
+    """List versions for a secret identified by its short name.
+
+    Args:
+        secret (str): Short secret name (e.g. "my-secret"), not the full resource path.
+
+    Returns:
+        list[dict]: Version metadata objects sorted by version key, or 404 JSON error.
+    """
     from cloudbox.services.secretmanager.store import get_store
 
     store = get_store()
@@ -414,7 +529,15 @@ async def api_sm_versions(secret: str = Query(...)):
 
 @app.get("/api/secretmanager/value")
 async def api_sm_value(secret: str = Query(...), version: str = Query(...)):
-    """Return the decoded payload for a secret version."""
+    """Return the decoded payload for a secret version.
+
+    Args:
+        secret (str): Short secret name (e.g. "my-secret").
+        version (str): Version identifier (e.g. "1" or "latest").
+
+    Returns:
+        dict: Decoded plaintext value under key "value", or 404 JSON error.
+    """
     from cloudbox.services.secretmanager.store import get_store
 
     store = get_store()
@@ -434,7 +557,14 @@ async def api_sm_value(secret: str = Query(...), version: str = Query(...)):
 
 @app.delete("/api/secretmanager/secrets")
 async def api_sm_delete_secret(secret: str = Query(...)):
-    """Delete a secret and all its versions."""
+    """Delete a secret and all its versions.
+
+    Args:
+        secret (str): Short secret name (e.g. "my-secret").
+
+    Returns:
+        dict: Confirmation with the deleted secret name, or 404 JSON error.
+    """
     from cloudbox.services.secretmanager.store import get_store
 
     store = get_store()
@@ -454,7 +584,11 @@ async def api_sm_delete_secret(secret: str = Query(...)):
 
 @app.get("/api/tasks/queues")
 async def api_tasks_queues():
-    """List all Cloud Tasks queues with task counts."""
+    """List all Cloud Tasks queues with task counts.
+
+    Returns:
+        list[dict]: Sorted list of queue metadata including taskCount.
+    """
     from cloudbox.services.tasks.store import get_store
 
     store = get_store()
@@ -468,7 +602,14 @@ async def api_tasks_queues():
 
 @app.get("/api/tasks/tasks")
 async def api_tasks_list(queue: str = Query(...)):
-    """List all tasks in a Cloud Tasks queue."""
+    """List all tasks in a Cloud Tasks queue.
+
+    Args:
+        queue (str): Full resource name of the queue.
+
+    Returns:
+        list[dict]: Task metadata objects sorted by task key.
+    """
     from cloudbox.services.tasks.store import get_store
 
     store = get_store()
@@ -482,7 +623,14 @@ async def api_tasks_list(queue: str = Query(...)):
 
 @app.delete("/api/tasks/task")
 async def api_tasks_delete_task(task: str = Query(...)):
-    """Delete a single Cloud Task by its full resource name."""
+    """Delete a single Cloud Task by its full resource name.
+
+    Args:
+        task (str): Full resource name of the task to delete.
+
+    Returns:
+        dict: Confirmation with the deleted task name.
+    """
     from cloudbox.services.tasks.store import get_store
 
     get_store().delete("tasks", task)
@@ -494,7 +642,11 @@ async def api_tasks_delete_task(task: str = Query(...)):
 
 @app.get("/api/bigquery/datasets")
 async def api_bq_datasets():
-    """List all BigQuery datasets with table counts."""
+    """List all BigQuery datasets with table counts.
+
+    Returns:
+        list[dict]: Sorted list of dataset info including datasetId, location, and tableCount.
+    """
     from cloudbox.services.bigquery.engine import get_engine
 
     engine = get_engine()
@@ -516,7 +668,14 @@ async def api_bq_datasets():
 
 @app.get("/api/bigquery/tables")
 async def api_bq_tables(dataset: str = Query(...)):
-    """List all tables in a BigQuery dataset."""
+    """List all tables in a BigQuery dataset.
+
+    Args:
+        dataset (str): BigQuery dataset ID.
+
+    Returns:
+        list[dict]: Sorted list of table info including tableId, schema, and numRows.
+    """
     from cloudbox.services.bigquery.engine import get_engine
 
     engine = get_engine()
@@ -537,7 +696,16 @@ async def api_bq_preview(
     table: str = Query(...),
     maxResults: int = Query(default=50),
 ):
-    """Preview rows from a BigQuery table."""
+    """Preview rows from a BigQuery table.
+
+    Args:
+        dataset (str): BigQuery dataset ID.
+        table (str): BigQuery table ID.
+        maxResults (int): Maximum number of rows to return (default 50).
+
+    Returns:
+        dict: Row data from the engine, or 404 JSON error if the table does not exist.
+    """
     from cloudbox.services.bigquery.engine import get_engine
 
     engine = get_engine()
@@ -549,7 +717,14 @@ async def api_bq_preview(
 
 @app.delete("/api/bigquery/dataset")
 async def api_bq_delete_dataset(dataset: str = Query(...)):
-    """Delete a BigQuery dataset and all its tables."""
+    """Delete a BigQuery dataset and all its tables.
+
+    Args:
+        dataset (str): BigQuery dataset ID to delete.
+
+    Returns:
+        dict: Confirmation with the deleted dataset ID, or 404 JSON error.
+    """
     from cloudbox.services.bigquery.engine import get_engine
 
     engine = get_engine()
@@ -562,7 +737,15 @@ async def api_bq_delete_dataset(dataset: str = Query(...)):
 
 @app.delete("/api/bigquery/table")
 async def api_bq_delete_table(dataset: str = Query(...), table: str = Query(...)):
-    """Delete a single BigQuery table."""
+    """Delete a single BigQuery table.
+
+    Args:
+        dataset (str): BigQuery dataset ID containing the table.
+        table (str): BigQuery table ID to delete.
+
+    Returns:
+        dict: Confirmation with the deleted "dataset.table" identifier, or 404 JSON error.
+    """
     from cloudbox.services.bigquery.engine import get_engine
 
     engine = get_engine()
@@ -581,7 +764,16 @@ async def api_logging_entries(
     severity: str = Query(default=""),
     limit: int = Query(default=100),
 ):
-    """Return log entries filtered by log name and minimum severity."""
+    """Return log entries filtered by log name and minimum severity.
+
+    Args:
+        log (str): Short log name suffix to filter by; empty string means no filter.
+        severity (str): Minimum severity level (e.g. "WARNING"); empty string means no filter.
+        limit (int): Maximum number of entries to return (default 100).
+
+    Returns:
+        list[dict]: Log entries sorted by timestamp descending, truncated to limit.
+    """
     from cloudbox.services.logging.store import get_store
 
     store = get_store()
@@ -603,7 +795,11 @@ async def api_logging_entries(
 
 @app.get("/api/logging/logs")
 async def api_logging_logs():
-    """Return a deduplicated list of log names seen in stored entries."""
+    """Return a deduplicated list of log names seen in stored entries.
+
+    Returns:
+        list[dict]: Sorted list of objects with logName and shortName fields.
+    """
     from cloudbox.services.logging.store import get_store
 
     store = get_store()
@@ -614,7 +810,14 @@ async def api_logging_logs():
 
 @app.delete("/api/logging/entries")
 async def api_logging_clear(log: str = Query(default="")):
-    """Clear log entries — all entries or only those matching a specific log name."""
+    """Clear log entries, either all entries or only those matching a specific log name.
+
+    Args:
+        log (str): Short log name suffix to match; empty string clears all entries.
+
+    Returns:
+        dict: Confirmation with the cleared log name or "all".
+    """
     from cloudbox.services.logging.store import get_store
 
     store = get_store()
@@ -634,7 +837,11 @@ async def api_logging_clear(log: str = Query(default="")):
 
 @app.get("/api/spanner/instances")
 async def api_spanner_instances():
-    """List all Cloud Spanner instances with database counts."""
+    """List all Cloud Spanner instances with database counts.
+
+    Returns:
+        list[dict]: Sorted list of instance info including instanceId, displayName, state, and databaseCount.
+    """
     from cloudbox.services.spanner.engine import get_engine
 
     engine = get_engine()
@@ -656,7 +863,14 @@ async def api_spanner_instances():
 
 @app.get("/api/spanner/databases")
 async def api_spanner_databases(instance: str = Query(...)):
-    """List all databases in a Cloud Spanner instance with table counts."""
+    """List all databases in a Cloud Spanner instance with table counts.
+
+    Args:
+        instance (str): Cloud Spanner instance ID.
+
+    Returns:
+        list[dict]: Sorted list of database info including databaseId, state, and tableCount.
+    """
     from cloudbox.services.spanner.engine import get_engine
 
     engine = get_engine()
@@ -677,7 +891,15 @@ async def api_spanner_databases(instance: str = Query(...)):
 
 @app.get("/api/spanner/tables")
 async def api_spanner_tables(instance: str = Query(...), database: str = Query(...)):
-    """List all tables in a Cloud Spanner database."""
+    """List all tables in a Cloud Spanner database.
+
+    Args:
+        instance (str): Cloud Spanner instance ID.
+        database (str): Cloud Spanner database ID.
+
+    Returns:
+        list[dict]: Sorted list of objects with tableName field.
+    """
     from cloudbox.services.spanner.engine import get_engine
 
     engine = get_engine()
@@ -687,7 +909,15 @@ async def api_spanner_tables(instance: str = Query(...), database: str = Query(.
 
 @app.delete("/api/spanner/databases")
 async def api_spanner_delete_database(instance: str = Query(...), database: str = Query(...)):
-    """Delete a Cloud Spanner database."""
+    """Delete a Cloud Spanner database.
+
+    Args:
+        instance (str): Cloud Spanner instance ID.
+        database (str): Cloud Spanner database ID to delete.
+
+    Returns:
+        dict: Confirmation with the deleted database ID, or 404 JSON error.
+    """
     from cloudbox.services.spanner.engine import get_engine
 
     engine = get_engine()
@@ -702,7 +932,11 @@ async def api_spanner_delete_database(instance: str = Query(...), database: str 
 
 @app.get("/api/scheduler/jobs")
 async def api_sched_jobs():
-    """List all Cloud Scheduler jobs."""
+    """List all Cloud Scheduler jobs.
+
+    Returns:
+        list[dict]: All jobs sorted by resource name.
+    """
     from cloudbox.services.scheduler.store import get_store
 
     store = get_store()
@@ -712,7 +946,14 @@ async def api_sched_jobs():
 
 @app.post("/api/scheduler/jobs/{job_id}:run")
 async def api_sched_run(job_id: str):
-    """Manually trigger a Cloud Scheduler job immediately."""
+    """Manually trigger a Cloud Scheduler job immediately.
+
+    Args:
+        job_id (str): Short job ID (last path segment of the resource name).
+
+    Returns:
+        dict: Updated job state after dispatch, or 404 JSON error if not found.
+    """
     from cloudbox.services.scheduler.store import get_store
     from cloudbox.services.scheduler.worker import _dispatch
 
@@ -736,7 +977,14 @@ async def api_sched_run(job_id: str):
 
 @app.post("/api/scheduler/jobs/{job_id}:pause")
 async def api_sched_pause(job_id: str):
-    """Pause a Cloud Scheduler job."""
+    """Pause a Cloud Scheduler job.
+
+    Args:
+        job_id (str): Short job ID (last path segment of the resource name).
+
+    Returns:
+        dict: Updated job state with state set to PAUSED, or 404 JSON error.
+    """
     from cloudbox.services.scheduler.store import get_store
 
     store = get_store()
@@ -750,7 +998,14 @@ async def api_sched_pause(job_id: str):
 
 @app.post("/api/scheduler/jobs/{job_id}:resume")
 async def api_sched_resume(job_id: str):
-    """Resume a paused Cloud Scheduler job."""
+    """Resume a paused Cloud Scheduler job.
+
+    Args:
+        job_id (str): Short job ID (last path segment of the resource name).
+
+    Returns:
+        dict: Updated job state with state set to ENABLED, or 404 JSON error.
+    """
     from cloudbox.services.scheduler.store import get_store
 
     store = get_store()
@@ -764,7 +1019,14 @@ async def api_sched_resume(job_id: str):
 
 @app.delete("/api/scheduler/jobs/{job_id}")
 async def api_sched_delete(job_id: str):
-    """Delete a Cloud Scheduler job."""
+    """Delete a Cloud Scheduler job.
+
+    Args:
+        job_id (str): Short job ID (last path segment of the resource name).
+
+    Returns:
+        Response: Empty 204 response on success, or 404 JSON error if not found.
+    """
     from cloudbox.services.scheduler.store import get_store
 
     store = get_store()
@@ -782,14 +1044,25 @@ async def api_sched_delete(job_id: str):
 
 @app.post("/reset/{service}")
 async def reset_service(service: str):
-    """Reset a single service's in-memory state."""
+    """Reset a single service's in-memory state.
+
+    Args:
+        service (str): Service name (e.g. "gcs", "pubsub", "firestore").
+
+    Returns:
+        dict: Confirmation with the reset service name.
+    """
     _reset_one(service)
     return {"reset": service}
 
 
 @app.post("/reset")
 async def reset_all():
-    """Reset all services' in-memory state."""
+    """Reset all services' in-memory state.
+
+    Returns:
+        dict: Confirmation with value "all".
+    """
     for svc in (
         "gcs",
         "pubsub",
@@ -806,6 +1079,11 @@ async def reset_all():
 
 
 def _reset_one(service: str) -> None:
+    """Reset the in-memory state for a single named service.
+
+    Args:
+        service (str): Service name key (e.g. "gcs", "pubsub", "bigquery").
+    """
     if service == "gcs":
         from cloudbox.services.gcs.store import get_store
 

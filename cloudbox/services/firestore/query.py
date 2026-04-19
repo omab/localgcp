@@ -6,7 +6,14 @@ from typing import Any
 
 
 def _extract_value(v: dict) -> Any:
-    """Extract a Python value from a Firestore typed value dict."""
+    """Extract a Python value from a Firestore typed value dict.
+
+    Args:
+        v (dict): A Firestore typed value dict (e.g. {"stringValue": "foo"}).
+
+    Returns:
+        Any: The unwrapped Python value, or None if the type is unrecognised.
+    """
     if "nullValue" in v:
         return None
     if "booleanValue" in v:
@@ -27,7 +34,15 @@ def _extract_value(v: dict) -> Any:
 
 
 def _get_field(doc_fields: dict, field_path: str) -> Any:
-    """Navigate a dotted field path into a Firestore fields dict."""
+    """Navigate a dotted field path into a Firestore fields dict.
+
+    Args:
+        doc_fields (dict): The "fields" dict of a Firestore document.
+        field_path (str): Dot-separated field path, e.g. "address.city".
+
+    Returns:
+        Any: The extracted Python value at that path, or None if not found.
+    """
     parts = field_path.split(".")
     current = doc_fields
     for part in parts:
@@ -56,7 +71,16 @@ def _get_field(doc_fields: dict, field_path: str) -> Any:
 
 
 def _eval_filter(doc: dict, filter_node: dict) -> bool:
-    """Evaluate a Firestore filter node against a document."""
+    """Evaluate a Firestore filter node against a document.
+
+    Args:
+        doc (dict): A Firestore document dict (with a "fields" key).
+        filter_node (dict): A structuredQuery filter node (compositeFilter,
+            fieldFilter, or unaryFilter).
+
+    Returns:
+        bool: True if the document matches the filter, False otherwise.
+    """
     if "compositeFilter" in filter_node:
         cf = filter_node["compositeFilter"]
         op = cf.get("op", "AND")
@@ -121,7 +145,16 @@ def _eval_filter(doc: dict, filter_node: dict) -> bool:
 
 
 def _cursor_doc_value(doc: dict, order: dict) -> Any:
-    """Return the Python value used for cursor comparison for one orderBy clause."""
+    """Return the Python value used for cursor comparison for one orderBy clause.
+
+    Args:
+        doc (dict): A Firestore document dict.
+        order (dict): A single orderBy clause dict with a "field.fieldPath" key.
+
+    Returns:
+        Any: The document value for the ordered field, or the document name
+            when the field path is "__name__".
+    """
     field_path = order["field"]["fieldPath"]
     if field_path == "__name__":
         return doc.get("name", "")
@@ -133,6 +166,16 @@ def _compare_doc_to_cursor(doc: dict, order_by: list[dict], cursor_values: list)
 
     Comparison respects each orderBy direction (ASCENDING / DESCENDING).
     Stops at the shortest of order_by / cursor_values.
+
+    Args:
+        doc (dict): A Firestore document dict.
+        order_by (list[dict]): The list of orderBy clause dicts from the query.
+        cursor_values (list): The list of cursor values (Firestore Value dicts or
+            plain Python values) corresponding to order_by.
+
+    Returns:
+        int: -1 if the document sorts before the cursor, 0 if at the cursor
+            position, or 1 if after.
     """
     for i, order in enumerate(order_by):
         if i >= len(cursor_values):
@@ -168,7 +211,16 @@ def _compare_doc_to_cursor(doc: dict, order_by: list[dict], cursor_values: list)
 
 
 def run_query(docs: list[dict], query: dict) -> list[dict]:
-    """Apply a structuredQuery dict to a list of document dicts."""
+    """Apply a structuredQuery dict to a list of document dicts.
+
+    Args:
+        docs (list[dict]): Candidate Firestore document dicts to filter.
+        query (dict): A structuredQuery dict (serialised via model_dump) containing
+            optional where, orderBy, startAt, endAt, offset, limit, and select keys.
+
+    Returns:
+        list[dict]: The filtered, ordered, and projected document dicts.
+    """
     results = list(docs)
 
     # WHERE
@@ -261,7 +313,16 @@ def run_query(docs: list[dict], query: dict) -> list[dict]:
 
 
 def _get_field_raw(doc_fields: dict, field_path: str) -> dict | None:
-    """Return the raw Firestore Value dict for a dotted field path, or None."""
+    """Return the raw Firestore Value dict for a dotted field path, or None.
+
+    Args:
+        doc_fields (dict): The "fields" dict of a Firestore document.
+        field_path (str): Dot-separated field path, e.g. "address.city".
+
+    Returns:
+        dict | None: The raw Firestore typed value dict at that path, or None if
+            the path does not exist or an intermediate node is not a mapValue.
+    """
     parts = field_path.split(".")
     current = doc_fields
     for i, part in enumerate(parts):

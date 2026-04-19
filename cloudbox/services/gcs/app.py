@@ -39,8 +39,18 @@ def _check_preconditions(
 
     if_match / if_none_match compare against the object's etag.
     if_generation_match / if_metageneration_match compare against the
-    object's generation / metageneration.  A value of "0" for
+    object's generation / metageneration. A value of "0" for
     if_generation_match means "object must not exist".
+
+    Args:
+        obj (dict | None): Current object metadata, or None if the object does not exist.
+        if_match (str | None): Required etag value; "*" matches any existing object.
+        if_none_match (str | None): Etag that must not match; "*" requires object absence.
+        if_generation_match (str | None): Required generation number; "0" requires absence.
+        if_metageneration_match (str | None): Required metageneration number.
+
+    Raises:
+        GCPError: With status 412 if a precondition fails, or 304 if If-None-Match matches.
     """
     etag = obj.get("etag", "") if obj else ""
     generation = str(obj.get("generation", "")) if obj else ""
@@ -75,6 +85,13 @@ def _parse_range(range_header: str, total: int) -> tuple[int, int] | None:
 
     Returns None if the header is absent, malformed, or unsatisfiable.
     Supports: bytes=start-end, bytes=start-, bytes=-suffix
+
+    Args:
+        range_header (str): Value of the HTTP Range header (e.g. "bytes=0-499").
+        total (int): Total number of bytes in the resource.
+
+    Returns:
+        tuple[int, int] | None: Inclusive (start, end) byte offsets, or None if unparseable.
     """
     if not range_header or not range_header.startswith("bytes="):
         return None
@@ -107,7 +124,16 @@ def _parse_range(range_header: str, total: int) -> tuple[int, int] | None:
 
 
 def _range_response(body: bytes, content_type: str, range_header: str | None) -> Response:
-    """Return a full 200 or partial 206 response depending on the Range header."""
+    """Return a full 200 or partial 206 response depending on the Range header.
+
+    Args:
+        body (bytes): Full object body bytes.
+        content_type (str): MIME type to set on the response.
+        range_header (str | None): Value of the HTTP Range header, or None for a full response.
+
+    Returns:
+        Response: A 200 response with the full body, a 206 partial response, or a 416 error.
+    """
     total = len(body)
     headers = {"Accept-Ranges": "bytes"}
     if range_header:
@@ -132,7 +158,11 @@ add_request_logging(app, "gcs")
 
 
 def _store():
-    """Return the GCS store instance."""
+    """Return the GCS store instance.
+
+    Returns:
+        NamespacedStore: Shared GCS store used by all route handlers.
+    """
     return get_store()
 
 
@@ -143,7 +173,17 @@ def _store():
 
 @app.post("/storage/v1/b", status_code=200)
 async def create_bucket(request: Request):
-    """Create a new GCS bucket."""
+    """Create a new GCS bucket.
+
+    Args:
+        request (Request): FastAPI request containing the JSON body with bucket name and options.
+
+    Returns:
+        dict: Newly created bucket metadata.
+
+    Raises:
+        GCPError: With status 400 if the name is missing, or 409 if the bucket already exists.
+    """
     body = await request.json()
     name = body.get("name", "")
     if not name:
@@ -158,7 +198,14 @@ async def create_bucket(request: Request):
 
 @app.get("/storage/v1/b")
 async def list_buckets(project: str = Query(default="local-project")):
-    """List all GCS buckets for a project."""
+    """List all GCS buckets for a project.
+
+    Args:
+        project (str): GCP project ID used as a filter (defaults to "local-project").
+
+    Returns:
+        dict: BucketListResponse serialised as a dict.
+    """
     store = _store()
     items = [BucketModel(**b) for b in store.list("buckets")]
     return BucketListResponse(items=items).model_dump(exclude_none=True)
@@ -166,7 +213,17 @@ async def list_buckets(project: str = Query(default="local-project")):
 
 @app.get("/storage/v1/b/{bucket}")
 async def get_bucket(bucket: str):
-    """Get a GCS bucket's metadata."""
+    """Get a GCS bucket's metadata.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        dict: Bucket metadata dict.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -176,7 +233,18 @@ async def get_bucket(bucket: str):
 
 @app.patch("/storage/v1/b/{bucket}")
 async def patch_bucket(bucket: str, request: Request):
-    """Update mutable fields on a GCS bucket."""
+    """Update mutable fields on a GCS bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket to update.
+        request (Request): FastAPI request containing the JSON body with fields to update.
+
+    Returns:
+        dict: Updated bucket metadata.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -195,7 +263,17 @@ async def patch_bucket(bucket: str, request: Request):
 
 @app.delete("/storage/v1/b/{bucket}", status_code=204)
 async def delete_bucket(bucket: str):
-    """Delete a GCS bucket (must be empty)."""
+    """Delete a GCS bucket (must be empty).
+
+    Args:
+        bucket (str): Name of the GCS bucket to delete.
+
+    Returns:
+        Response: Empty 204 response on success.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist, or 409 if it is not empty.
+    """
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, "The specified bucket does not exist.")
@@ -214,7 +292,17 @@ async def delete_bucket(bucket: str):
 
 @app.get("/storage/v1/b/{bucket}/cors")
 async def get_bucket_cors(bucket: str):
-    """Get the CORS configuration for a bucket."""
+    """Get the CORS configuration for a bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        dict: Mapping with "cors", "kind", and "id" keys.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -224,7 +312,18 @@ async def get_bucket_cors(bucket: str):
 
 @app.put("/storage/v1/b/{bucket}/cors")
 async def set_bucket_cors(bucket: str, request: Request):
-    """Replace the CORS configuration for a bucket."""
+    """Replace the CORS configuration for a bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        request (Request): FastAPI request containing the JSON body with the new CORS rules.
+
+    Returns:
+        dict: Mapping with updated "cors", "kind", and "id" keys.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -241,7 +340,17 @@ async def set_bucket_cors(bucket: str, request: Request):
 
 @app.delete("/storage/v1/b/{bucket}/cors", status_code=204)
 async def delete_bucket_cors(bucket: str):
-    """Clear the CORS configuration for a bucket."""
+    """Clear the CORS configuration for a bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        Response: Empty 204 response on success.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -262,7 +371,17 @@ async def delete_bucket_cors(bucket: str):
 
 @app.get("/storage/v1/b/{bucket}/retentionPolicy")
 async def get_bucket_retention(bucket: str):
-    """Get the retention policy for a bucket."""
+    """Get the retention policy for a bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        dict: Mapping with "retentionPolicy", "kind", and "id" keys.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     data = store.get("buckets", bucket)
     if data is None:
@@ -273,7 +392,18 @@ async def get_bucket_retention(bucket: str):
 
 @app.patch("/storage/v1/b/{bucket}/retentionPolicy")
 async def set_bucket_retention(bucket: str, request: Request):
-    """Set or update the retention policy for a bucket."""
+    """Set or update the retention policy for a bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        request (Request): FastAPI request containing the JSON body with the retention policy.
+
+    Returns:
+        dict: Mapping with updated "retentionPolicy", "kind", and "id" keys.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     from cloudbox.services.gcs.models import RetentionPolicy, _now_rfc3339
 
     store = _store()
@@ -297,7 +427,17 @@ async def set_bucket_retention(bucket: str, request: Request):
 
 @app.delete("/storage/v1/b/{bucket}/retentionPolicy", status_code=204)
 async def delete_bucket_retention(bucket: str):
-    """Remove the retention policy from a bucket (fails if the policy is locked)."""
+    """Remove the retention policy from a bucket (fails if the policy is locked).
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        Response: Empty 204 response on success.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist, or 403 if the policy is locked.
+    """
     from cloudbox.services.gcs.models import _now_rfc3339
 
     store = _store()
@@ -329,7 +469,26 @@ async def upload_object(
     x_upload_content_type: Annotated[str | None, Header(alias="x-upload-content-type")] = None,
     x_upload_content_length: Annotated[str | None, Header(alias="x-upload-content-length")] = None,
 ):
-    """Upload a new object (media, multipart, or resumable initiation)."""
+    """Upload a new object (media, multipart, or resumable initiation).
+
+    Args:
+        bucket (str): Name of the destination GCS bucket.
+        request (Request): FastAPI request containing the object body or multipart data.
+        name (str): Object name; required for media uploads.
+        uploadType (str): One of "media", "multipart", or "resumable".
+        ifGenerationMatch (str): Precondition: required generation number; "0" means must not exist.
+        content_type (str | None): MIME type from the Content-Type header.
+        x_upload_content_type (str | None): MIME type hint for resumable uploads.
+        x_upload_content_length (str | None): Total byte length hint for resumable uploads.
+
+    Returns:
+        dict | Response: Object metadata dict for media/multipart, or a 200 Response with a
+            Location header for resumable initiation.
+
+    Raises:
+        GCPError: With status 400 if required parameters are missing, or 404 if the bucket
+            does not exist.
+    """
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, "The specified bucket does not exist.")
@@ -379,7 +538,23 @@ async def _initiate_resumable(
     total_size: int | None,
     if_generation_match: str | None = None,
 ) -> Response:
-    """Initiate a resumable upload session; returns 200 with Location header."""
+    """Initiate a resumable upload session; returns 200 with Location header.
+
+    Args:
+        request (Request): FastAPI request containing the JSON body with optional object metadata.
+        store (NamespacedStore): GCS store instance used to persist session state.
+        bucket (str): Name of the destination GCS bucket.
+        name (str): Object name; may be overridden by the JSON body.
+        content_type (str): MIME type for the object.
+        total_size (int | None): Total expected upload size in bytes, or None if unknown.
+        if_generation_match (str | None): Precondition generation value to enforce on finalise.
+
+    Returns:
+        Response: 200 response with a Location header pointing to the resumable session URL.
+
+    Raises:
+        GCPError: With status 400 if the object name cannot be determined.
+    """
     try:
         body = await request.json()
     except Exception:
@@ -414,7 +589,21 @@ async def upload_resumable_chunk(
     upload_id: str = Query(...),
     content_range: Annotated[str | None, Header(alias="content-range")] = None,
 ):
-    """Upload data (or a chunk) to an active resumable session."""
+    """Upload data (or a chunk) to an active resumable session.
+
+    Args:
+        bucket (str): Name of the destination GCS bucket.
+        request (Request): FastAPI request containing the chunk body bytes.
+        upload_id (str): Resumable session identifier returned by the initiation request.
+        content_range (str | None): HTTP Content-Range header describing this chunk's range.
+
+    Returns:
+        dict | Response: Object metadata dict when the upload is complete, or a 308 Response
+            with a Range header indicating how many bytes have been received so far.
+
+    Raises:
+        GCPError: With status 404 if the upload session is not found.
+    """
     store = _store()
     session = store.get("resumable_sessions", upload_id)
     if session is None:
@@ -480,7 +669,16 @@ async def upload_resumable_chunk(
 
 
 def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
-    """Very minimal multipart/related parser for GCS multipart uploads."""
+    """Very minimal multipart/related parser for GCS multipart uploads.
+
+    Args:
+        raw (bytes): Raw request body bytes containing the multipart/related payload.
+        content_type (str): Value of the Content-Type header, used to extract the boundary.
+
+    Returns:
+        tuple[str, bytes, str]: A 3-tuple of (object_name, body_bytes, body_content_type).
+            object_name is empty if not found in the metadata part.
+    """
     # Extract boundary from content-type header
     boundary = None
     for part in content_type.split(";"):
@@ -538,7 +736,15 @@ def _parse_multipart(raw: bytes, content_type: str) -> tuple[str, bytes, str]:
 
 
 def _retention_expiry(bucket_data: dict, time_created: str) -> str:
-    """Compute retentionExpirationTime for an object given the bucket's policy."""
+    """Compute retentionExpirationTime for an object given the bucket's policy.
+
+    Args:
+        bucket_data (dict): Bucket metadata dict, which may contain a "retentionPolicy" key.
+        time_created (str): RFC 3339 timestamp of when the object was created.
+
+    Returns:
+        str: RFC 3339 expiry timestamp, or an empty string if no retention policy is set.
+    """
     from datetime import datetime, timedelta
 
     policy = bucket_data.get("retentionPolicy") if bucket_data else None
@@ -556,7 +762,18 @@ def _retention_expiry(bucket_data: dict, time_created: str) -> str:
 
 
 def _store_object(store, bucket: str, name: str, body: bytes, content_type: str) -> dict:
-    """Persist an object's body and metadata, then fire OBJECT_FINALIZE notifications."""
+    """Persist an object's body and metadata, then fire OBJECT_FINALIZE notifications.
+
+    Args:
+        store (NamespacedStore): GCS store instance.
+        bucket (str): Name of the destination GCS bucket.
+        name (str): Object name within the bucket.
+        body (bytes): Raw object body bytes to store.
+        content_type (str): MIME type of the object.
+
+    Returns:
+        dict: ObjectModel metadata dict for the newly stored object.
+    """
     from cloudbox.services.gcs.models import _now_rfc3339
 
     key = f"{bucket}/{name}"
@@ -592,7 +809,14 @@ def _store_object(store, bucket: str, name: str, body: bytes, content_type: str)
 
 
 def _crc32c_b64(data: bytes) -> str:
-    """Compute the CRC32c checksum of data and return it base64-encoded."""
+    """Compute the CRC32c checksum of data and return it base64-encoded.
+
+    Args:
+        data (bytes): Input bytes to checksum.
+
+    Returns:
+        str: Base64-encoded 4-byte CRC32c checksum of the input.
+    """
     import struct
 
     crc = 0
@@ -613,7 +837,15 @@ def _crc32c_b64(data: bytes) -> str:
 
 
 def _lifecycle_condition_matches(obj: dict, condition: LifecycleCondition) -> bool:
-    """Return True if the object satisfies all conditions in the lifecycle rule."""
+    """Return True if the object satisfies all conditions in the lifecycle rule.
+
+    Args:
+        obj (dict): Object metadata dict to evaluate against the condition.
+        condition (LifecycleCondition): Lifecycle condition containing age, date, and class filters.
+
+    Returns:
+        bool: True if all non-None condition fields are satisfied by the object.
+    """
     from datetime import datetime
 
     now = datetime.now(UTC)
@@ -649,7 +881,12 @@ def _lifecycle_condition_matches(obj: dict, condition: LifecycleCondition) -> bo
 
 
 def _apply_lifecycle(store, bucket: str) -> None:
-    """Apply the bucket's lifecycle rules to all its objects (lazy enforcement)."""
+    """Apply the bucket's lifecycle rules to all its objects (lazy enforcement).
+
+    Args:
+        store (NamespacedStore): GCS store instance.
+        bucket (str): Name of the GCS bucket whose lifecycle rules should be evaluated.
+    """
     bucket_data = store.get("buckets", bucket)
     if not bucket_data:
         return
@@ -698,7 +935,21 @@ async def list_objects(
     maxResults: int = Query(default=1000),
     pageToken: str = Query(default=""),
 ):
-    """List objects in a bucket with optional prefix and delimiter filtering."""
+    """List objects in a bucket with optional prefix and delimiter filtering.
+
+    Args:
+        bucket (str): Name of the GCS bucket to list.
+        prefix (str): Only return objects whose names begin with this prefix.
+        delimiter (str): Collapse object names at this delimiter into "prefixes" entries.
+        maxResults (int): Maximum number of objects to return per page.
+        pageToken (str): Opaque token from a previous response to retrieve the next page.
+
+    Returns:
+        dict: ObjectListResponse serialised as a dict, including items and prefixes.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, "The specified bucket does not exist.")
@@ -755,7 +1006,24 @@ async def get_object_metadata(
     if_match: Annotated[str | None, Header(alias="if-match")] = None,
     if_none_match: Annotated[str | None, Header(alias="if-none-match")] = None,
 ):
-    """Get object metadata or download object body (when alt=media)."""
+    """Get object metadata or download object body (when alt=media).
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        object_name (str): Name of the GCS object.
+        alt (str): When set to "media", streams the object body instead of returning metadata.
+        ifGenerationMatch (str): Precondition: required generation number.
+        ifMetagenerationMatch (str): Precondition: required metageneration number.
+        range (str | None): HTTP Range header for partial content requests.
+        if_match (str | None): HTTP If-Match header for etag preconditions.
+        if_none_match (str | None): HTTP If-None-Match header for etag preconditions.
+
+    Returns:
+        dict | Response: Object metadata dict, or a 200/206 Response with the object body.
+
+    Raises:
+        GCPError: With status 404 if the object does not exist, or 412/304 on precondition failure.
+    """
     store = _store()
     key = f"{bucket}/{object_name}"
     data = store.get("objects", key)
@@ -784,7 +1052,19 @@ async def download_object(
     object_name: str,
     range: Annotated[str | None, Header(alias="range")] = None,
 ):
-    """Download an object's body via the /download/storage path."""
+    """Download an object's body via the /download/storage path.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        object_name (str): Name of the GCS object to download.
+        range (str | None): HTTP Range header for partial content requests.
+
+    Returns:
+        Response: A 200 or 206 Response containing the object body bytes.
+
+    Raises:
+        GCPError: With status 404 if the object does not exist.
+    """
     store = _store()
     key = f"{bucket}/{object_name}"
     data = store.get("objects", key)
@@ -805,7 +1085,23 @@ async def update_object_metadata(
     if_match: Annotated[str | None, Header(alias="if-match")] = None,
     if_none_match: Annotated[str | None, Header(alias="if-none-match")] = None,
 ):
-    """Update mutable metadata fields on an existing GCS object."""
+    """Update mutable metadata fields on an existing GCS object.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        object_name (str): Name of the GCS object to update.
+        request (Request): FastAPI request containing the JSON body with fields to patch.
+        ifGenerationMatch (str): Precondition: required generation number.
+        ifMetagenerationMatch (str): Precondition: required metageneration number.
+        if_match (str | None): HTTP If-Match header for etag preconditions.
+        if_none_match (str | None): HTTP If-None-Match header for etag preconditions.
+
+    Returns:
+        dict: Updated object metadata dict.
+
+    Raises:
+        GCPError: With status 404 if the object does not exist, or 412/304 on precondition failure.
+    """
     store = _store()
     key = f"{bucket}/{object_name}"
     data = store.get("objects", key)
@@ -847,7 +1143,23 @@ async def delete_object(
     if_match: Annotated[str | None, Header(alias="if-match")] = None,
     if_none_match: Annotated[str | None, Header(alias="if-none-match")] = None,
 ):
-    """Delete a GCS object (blocked if within a retention period)."""
+    """Delete a GCS object (blocked if within a retention period).
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        object_name (str): Name of the GCS object to delete.
+        ifGenerationMatch (str): Precondition: required generation number.
+        ifMetagenerationMatch (str): Precondition: required metageneration number.
+        if_match (str | None): HTTP If-Match header for etag preconditions.
+        if_none_match (str | None): HTTP If-None-Match header for etag preconditions.
+
+    Returns:
+        Response: Empty 204 response on success.
+
+    Raises:
+        GCPError: With status 404 if the object does not exist, 412/304 on precondition failure,
+            or 403 if the object is within a retention period.
+    """
     store = _store()
     key = f"{bucket}/{object_name}"
     obj_data = store.get("objects", key)
@@ -886,7 +1198,20 @@ async def delete_object(
     "/storage/v1/b/{src_bucket}/o/{src_object:path}/copyTo/b/{dst_bucket}/o/{dst_object:path}"
 )
 async def copy_object(src_bucket: str, src_object: str, dst_bucket: str, dst_object: str):
-    """Copy a GCS object to a new location (server-side copy)."""
+    """Copy a GCS object to a new location (server-side copy).
+
+    Args:
+        src_bucket (str): Source bucket name.
+        src_object (str): Source object name.
+        dst_bucket (str): Destination bucket name.
+        dst_object (str): Destination object name.
+
+    Returns:
+        dict: Metadata dict for the newly created destination object.
+
+    Raises:
+        GCPError: With status 404 if the source object or destination bucket does not exist.
+    """
     store = _store()
     src_key = f"{src_bucket}/{src_object}"
     data = store.get("objects", src_key)
@@ -907,7 +1232,20 @@ async def copy_object(src_bucket: str, src_object: str, dst_bucket: str, dst_obj
 
 @app.post("/storage/v1/b/{bucket}/o/{object_name:path}/compose")
 async def compose_object(bucket: str, object_name: str, request: Request):
-    """Concatenate up to 32 source objects into a single destination object."""
+    """Concatenate up to 32 source objects into a single destination object.
+
+    Args:
+        bucket (str): Name of the GCS bucket that contains both sources and the destination.
+        object_name (str): Name of the composed destination object.
+        request (Request): FastAPI request containing the JSON body with sourceObjects list.
+
+    Returns:
+        dict: Metadata dict for the newly composed destination object.
+
+    Raises:
+        GCPError: With status 400 if sourceObjects is empty or exceeds 32 entries, or 404/412
+            if any source object is missing or fails a generation precondition.
+    """
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, "The specified bucket does not exist.")
@@ -966,6 +1304,19 @@ async def rewrite_object(
     Completes in a single shot — rewriteToken is not used for resumption.
     The response mirrors the real GCS rewrite response so the SDK's
     polling loop terminates immediately on the first call.
+
+    Args:
+        src_bucket (str): Source bucket name.
+        src_object (str): Source object name.
+        dst_bucket (str): Destination bucket name.
+        dst_object (str): Destination object name.
+        request (Request): FastAPI request containing the JSON body with optional metadata overrides.
+
+    Returns:
+        dict: GCS rewrite response with "done", "resource", and byte count fields.
+
+    Raises:
+        GCPError: With status 404 if the source object or destination bucket does not exist.
     """
     store = _store()
     src_key = f"{src_bucket}/{src_object}"
@@ -1007,7 +1358,15 @@ async def rewrite_object(
 
 
 def _next_notification_id(store, bucket: str) -> str:
-    """Return the next sequential notification config ID for a bucket."""
+    """Return the next sequential notification config ID for a bucket.
+
+    Args:
+        store (NamespacedStore): GCS store instance.
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        str: Next integer ID as a string (e.g. "1", "2", ...).
+    """
     prefix = f"{bucket}/"
     existing_ids = [
         int(k[len(prefix) :])
@@ -1019,7 +1378,18 @@ def _next_notification_id(store, bucket: str) -> str:
 
 @app.post("/storage/v1/b/{bucket}/notificationConfigs", status_code=200)
 async def create_notification(bucket: str, request: Request):
-    """Create a bucket notification configuration."""
+    """Create a bucket notification configuration.
+
+    Args:
+        bucket (str): Name of the GCS bucket to attach the notification to.
+        request (Request): FastAPI request containing the JSON body with notification config fields.
+
+    Returns:
+        dict: Newly created NotificationConfig serialised as a dict.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, "The specified bucket does not exist.")
@@ -1036,7 +1406,17 @@ async def create_notification(bucket: str, request: Request):
 
 @app.get("/storage/v1/b/{bucket}/notificationConfigs")
 async def list_notifications(bucket: str):
-    """List all notification configurations for a bucket."""
+    """List all notification configurations for a bucket.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+
+    Returns:
+        dict: NotificationListResponse serialised as a dict.
+
+    Raises:
+        GCPError: With status 404 if the bucket does not exist.
+    """
     store = _store()
     if not store.exists("buckets", bucket):
         raise GCPError(404, "The specified bucket does not exist.")
@@ -1055,7 +1435,18 @@ async def list_notifications(bucket: str):
 
 @app.get("/storage/v1/b/{bucket}/notificationConfigs/{notif_id}")
 async def get_notification(bucket: str, notif_id: str):
-    """Get a bucket notification configuration by ID."""
+    """Get a bucket notification configuration by ID.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        notif_id (str): Notification configuration ID.
+
+    Returns:
+        dict: NotificationConfig metadata dict.
+
+    Raises:
+        GCPError: With status 404 if the notification config does not exist.
+    """
     store = _store()
     data = store.get("notifications", f"{bucket}/{notif_id}")
     if data is None:
@@ -1065,7 +1456,18 @@ async def get_notification(bucket: str, notif_id: str):
 
 @app.delete("/storage/v1/b/{bucket}/notificationConfigs/{notif_id}", status_code=204)
 async def delete_notification(bucket: str, notif_id: str):
-    """Delete a bucket notification configuration."""
+    """Delete a bucket notification configuration.
+
+    Args:
+        bucket (str): Name of the GCS bucket.
+        notif_id (str): Notification configuration ID to delete.
+
+    Returns:
+        Response: Empty 204 response on success.
+
+    Raises:
+        GCPError: With status 404 if the notification config does not exist.
+    """
     store = _store()
     if not store.delete("notifications", f"{bucket}/{notif_id}"):
         raise GCPError(404, f"Notification config {notif_id} not found on bucket {bucket}.")
@@ -1082,7 +1484,13 @@ def _fire_notifications(store, bucket: str, event_type: str, obj_data: dict) -> 
 
     Iterates all notification configs on the bucket and enqueues a message
     to the configured Pub/Sub topic for each matching config.
-    No-ops silently if the topic or subscription doesn't exist yet.
+    No-ops silently if the topic or subscription does not exist yet.
+
+    Args:
+        store (NamespacedStore): GCS store instance used to look up notification configs.
+        bucket (str): Name of the GCS bucket that originated the event.
+        event_type (str): GCS event type string (e.g. "OBJECT_FINALIZE", "OBJECT_DELETE").
+        obj_data (dict): Object metadata dict describing the object involved in the event.
     """
     import base64
     import json

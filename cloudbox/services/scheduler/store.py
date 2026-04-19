@@ -10,6 +10,6 @@ def get_store() -> NamespacedStore:
     """Return the shared Cloud Scheduler store instance.
 
     Returns:
-        The module-level ``NamespacedStore`` used by all Scheduler route handlers.
+        NamespacedStore: The module-level store used by all Scheduler route handlers.
     """
     return _store

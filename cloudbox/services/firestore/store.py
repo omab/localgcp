@@ -16,6 +16,6 @@ def get_store() -> NamespacedStore:
     """Return the shared Firestore store instance.
 
     Returns:
-        The module-level ``NamespacedStore`` used by all Firestore route handlers.
+        NamespacedStore: The module-level store used by all Firestore route handlers.
     """
     return _store

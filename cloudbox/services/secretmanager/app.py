@@ -28,12 +28,23 @@ add_request_logging(app, "secretmanager")
 
 
 def _store():
-    """Return the Secret Manager store instance."""
+    """Return the Secret Manager store instance.
+
+    Returns:
+        NamespacedStore: The shared Secret Manager store.
+    """
     return get_store()
 
 
 def _version_number(secret_name: str) -> int:
-    """Return the next version number for a secret."""
+    """Return the next version number for a secret.
+
+    Args:
+        secret_name (str): Full resource name of the secret.
+
+    Returns:
+        int: Next version number (max existing + 1, or 1 if none exist).
+    """
     store = _store()
     existing = [k for k in store.keys("versions") if k.startswith(f"{secret_name}/versions/")]
     nums = []
@@ -46,7 +57,15 @@ def _version_number(secret_name: str) -> int:
 
 
 def _resolve_version(secret_name: str, version_id: str) -> str | None:
-    """Resolve 'latest' or a numeric version to the canonical version key."""
+    """Resolve 'latest' or a numeric version ID to the canonical version key.
+
+    Args:
+        secret_name (str): Full resource name of the secret.
+        version_id (str): Version identifier, either 'latest' or a numeric string.
+
+    Returns:
+        str | None: The canonical store key for the version, or None if not found.
+    """
     store = _store()
     if version_id == "latest":
         candidates = [k for k in store.keys("versions") if k.startswith(f"{secret_name}/versions/")]
@@ -73,7 +92,18 @@ def _resolve_version(secret_name: str, version_id: str) -> str | None:
 
 @app.post("/v1/projects/{project}/secrets")
 async def create_secret(project: str, request: Request):
-    """Create a new secret resource."""
+    """Create a new secret resource.
+
+    Args:
+        project (str): GCP project ID.
+        request (Request): HTTP request containing secretId and optional labels.
+
+    Returns:
+        dict: The newly created SecretModel serialized to a dict.
+
+    Raises:
+        GCPError: If secretId is missing (400) or the secret already exists (409).
+    """
     body = await request.json()
     secret_id = request.query_params.get("secretId", body.get("secretId", ""))
     if not secret_id:
@@ -98,7 +128,16 @@ async def list_secrets(
     pageSize: int = Query(default=25),
     pageToken: str = Query(default=""),
 ):
-    """List secrets in a project."""
+    """List secrets in a project.
+
+    Args:
+        project (str): GCP project ID.
+        pageSize (int): Maximum number of secrets to return per page.
+        pageToken (str): Pagination token from a previous response.
+
+    Returns:
+        dict: ListSecretsResponse with secrets, nextPageToken, and totalSize.
+    """
     store = _store()
     prefix = f"projects/{project}/secrets/"
     all_secrets = [SecretModel(**v) for v in store.list("secrets") if v["name"].startswith(prefix)]
@@ -113,7 +152,18 @@ async def list_secrets(
 
 @app.get("/v1/projects/{project}/secrets/{secret_id}")
 async def get_secret(project: str, secret_id: str):
-    """Get a secret resource by ID."""
+    """Get a secret resource by ID.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+
+    Returns:
+        dict: The SecretModel dict for the requested secret.
+
+    Raises:
+        GCPError: If the secret does not exist (404).
+    """
     name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     data = store.get("secrets", name)
@@ -124,7 +174,19 @@ async def get_secret(project: str, secret_id: str):
 
 @app.patch("/v1/projects/{project}/secrets/{secret_id}")
 async def update_secret(project: str, secret_id: str, request: Request):
-    """Update mutable fields (e.g. labels) on a secret."""
+    """Update mutable fields on a secret, such as labels.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        request (Request): HTTP request body with fields to update.
+
+    Returns:
+        dict: The updated SecretModel dict.
+
+    Raises:
+        GCPError: If the secret does not exist (404).
+    """
     name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     data = store.get("secrets", name)
@@ -139,7 +201,18 @@ async def update_secret(project: str, secret_id: str, request: Request):
 
 @app.delete("/v1/projects/{project}/secrets/{secret_id}", status_code=200)
 async def delete_secret(project: str, secret_id: str):
-    """Delete a secret and all its versions."""
+    """Delete a secret and all its versions.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+
+    Returns:
+        dict: Empty dict on success.
+
+    Raises:
+        GCPError: If the secret does not exist (404).
+    """
     name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     if not store.exists("secrets", name):
@@ -160,7 +233,19 @@ async def delete_secret(project: str, secret_id: str):
 
 @app.post("/v1/projects/{project}/secrets/{secret_id}:addVersion")
 async def add_version(project: str, secret_id: str, body: AddVersionRequest):
-    """Add a new version to a secret with base64-encoded payload data."""
+    """Add a new version to a secret with base64-encoded payload data.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        body (AddVersionRequest): Request body containing the base64-encoded payload.
+
+    Returns:
+        dict: The newly created SecretVersionModel dict.
+
+    Raises:
+        GCPError: If the secret does not exist (404).
+    """
     secret_name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     if not store.exists("secrets", secret_name):
@@ -184,7 +269,21 @@ async def list_versions(
     pageToken: str = Query(default=""),
     filter: str = Query(default=""),
 ):
-    """List versions of a secret, optionally filtered by state."""
+    """List versions of a secret, optionally filtered by state.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        pageSize (int): Maximum number of versions to return per page.
+        pageToken (str): Pagination token from a previous response.
+        filter (str): Optional state filter expression such as 'state=ENABLED'.
+
+    Returns:
+        dict: ListSecretVersionsResponse with versions, nextPageToken, and totalSize.
+
+    Raises:
+        GCPError: If the secret does not exist (404).
+    """
     secret_name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     if not store.exists("secrets", secret_name):
@@ -213,7 +312,19 @@ async def list_versions(
 
 @app.get("/v1/projects/{project}/secrets/{secret_id}/versions/{version_id}")
 async def get_version(project: str, secret_id: str, version_id: str):
-    """Get metadata for a specific secret version."""
+    """Get metadata for a specific secret version.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        version_id (str): Version identifier or 'latest'.
+
+    Returns:
+        dict: The SecretVersionModel dict for the requested version.
+
+    Raises:
+        GCPError: If the version does not exist (404).
+    """
     secret_name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     version_key = _resolve_version(secret_name, version_id)
@@ -224,7 +335,19 @@ async def get_version(project: str, secret_id: str, version_id: str):
 
 @app.post("/v1/projects/{project}/secrets/{secret_id}/versions/{version_id}:access")
 async def access_version(project: str, secret_id: str, version_id: str):
-    """Access (decrypt) the payload of a secret version."""
+    """Access (decrypt) the payload of a secret version.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        version_id (str): Version identifier or 'latest'.
+
+    Returns:
+        dict: AccessSecretVersionResponse with name and base64-encoded payload.
+
+    Raises:
+        GCPError: If the version does not exist (404) or is not enabled (403).
+    """
     secret_name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     version_key = _resolve_version(secret_name, version_id)
@@ -244,19 +367,55 @@ async def access_version(project: str, secret_id: str, version_id: str):
 
 @app.post("/v1/projects/{project}/secrets/{secret_id}/versions/{version_id}:disable")
 async def disable_version(project: str, secret_id: str, version_id: str):
-    """Disable a secret version, preventing access to its payload."""
+    """Disable a secret version, preventing access to its payload.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        version_id (str): Version identifier or 'latest'.
+
+    Returns:
+        dict: The updated SecretVersionModel dict with state DISABLED.
+
+    Raises:
+        GCPError: If the version does not exist (404).
+    """
     return _set_version_state(project, secret_id, version_id, SecretVersionState.DISABLED)
 
 
 @app.post("/v1/projects/{project}/secrets/{secret_id}/versions/{version_id}:enable")
 async def enable_version(project: str, secret_id: str, version_id: str):
-    """Re-enable a disabled secret version."""
+    """Re-enable a disabled secret version.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        version_id (str): Version identifier or 'latest'.
+
+    Returns:
+        dict: The updated SecretVersionModel dict with state ENABLED.
+
+    Raises:
+        GCPError: If the version does not exist (404).
+    """
     return _set_version_state(project, secret_id, version_id, SecretVersionState.ENABLED)
 
 
 @app.post("/v1/projects/{project}/secrets/{secret_id}/versions/{version_id}:destroy")
 async def destroy_version(project: str, secret_id: str, version_id: str):
-    """Destroy a secret version, wiping its payload permanently."""
+    """Destroy a secret version, wiping its payload permanently.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        version_id (str): Version identifier or 'latest'.
+
+    Returns:
+        dict: The updated SecretVersionModel dict with state DESTROYED.
+
+    Raises:
+        GCPError: If the version does not exist (404).
+    """
     result = _set_version_state(project, secret_id, version_id, SecretVersionState.DESTROYED)
     # Wipe payload
     secret_name = f"projects/{project}/secrets/{secret_id}"
@@ -267,7 +426,20 @@ async def destroy_version(project: str, secret_id: str, version_id: str):
 
 
 def _set_version_state(project: str, secret_id: str, version_id: str, state: str):
-    """Set the state of a secret version and persist the change."""
+    """Set the state of a secret version and persist the change.
+
+    Args:
+        project (str): GCP project ID.
+        secret_id (str): Secret resource ID.
+        version_id (str): Version identifier or 'latest'.
+        state (str): Target state from SecretVersionState constants.
+
+    Returns:
+        dict: The updated SecretVersionModel dict with the new state.
+
+    Raises:
+        GCPError: If the version does not exist (404).
+    """
     secret_name = f"projects/{project}/secrets/{secret_id}"
     store = _store()
     version_key = _resolve_version(secret_name, version_id)

@@ -70,7 +70,14 @@ _DUCK_TO_SPANNER: dict[str, str] = {
 
 
 def _spanner_type_to_duck(type_str: str) -> str:
-    """Convert a Spanner column type string to a DuckDB type string."""
+    """Convert a Spanner column type string to a DuckDB type string.
+
+    Args:
+        type_str (str): Spanner type string such as STRING(MAX), INT64, or ARRAY<STRING>.
+
+    Returns:
+        str: Equivalent DuckDB type string.
+    """
     t = type_str.strip()
     # ARRAY<T> → JSON
     if re.match(r"ARRAY\s*<", t, re.IGNORECASE):
@@ -81,6 +88,14 @@ def _spanner_type_to_duck(type_str: str) -> str:
 
 
 def _duck_type_to_spanner(duck_type: str) -> str:
+    """Convert a DuckDB column type string to a Spanner type code.
+
+    Args:
+        duck_type (str): DuckDB type string such as VARCHAR, BIGINT, or TIMESTAMPTZ.
+
+    Returns:
+        str: Spanner type code such as STRING, INT64, or TIMESTAMP.
+    """
     t = duck_type.upper().strip()
     if "(" in t:
         t = t[: t.index("(")].strip()
@@ -88,11 +103,24 @@ def _duck_type_to_spanner(duck_type: str) -> str:
 
 
 def _now() -> str:
+    """Return the current UTC time as a Spanner-compatible timestamp string.
+
+    Returns:
+        str: Timestamp in the format YYYY-MM-DDTHH:MM:SS.mmmZ.
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _serialize_spanner(v: Any, spanner_type_code: str = "STRING") -> Any:
-    """Serialize a Python value to Spanner wire format."""
+    """Serialize a Python value to Spanner wire format.
+
+    Args:
+        v (Any): The Python value to serialize.
+        spanner_type_code (str): Spanner type code controlling serialization, e.g. INT64 or BYTES.
+
+    Returns:
+        Any: The value in Spanner wire format, or None if v is None.
+    """
     if v is None:
         return None
     code = spanner_type_code.upper()
@@ -132,7 +160,14 @@ def _serialize_spanner(v: Any, spanner_type_code: str = "STRING") -> Any:
 
 
 def _split_col_defs(section: str) -> list[str]:
-    """Split column definitions by commas, respecting nested parens and <> brackets."""
+    """Split column definitions by commas, respecting nested parens and angle brackets.
+
+    Args:
+        section (str): The raw text between the outer parentheses of a CREATE TABLE statement.
+
+    Returns:
+        list[str]: Individual column definition strings.
+    """
     parts: list[str] = []
     depth = 0
     angle = 0
@@ -164,7 +199,15 @@ def _split_col_defs(section: str) -> list[str]:
 
 
 def _find_matching_paren(s: str, start: int) -> int:
-    """Return index of the closing ')' matching the '(' at s[start]."""
+    """Return the index of the closing parenthesis matching the opening one at s[start].
+
+    Args:
+        s (str): String to scan.
+        start (int): Index of the opening parenthesis.
+
+    Returns:
+        int: Index of the matching closing parenthesis, or the last index if unmatched.
+    """
     depth = 0
     for i in range(start, len(s)):
         if s[i] == "(":
@@ -177,7 +220,15 @@ def _find_matching_paren(s: str, start: int) -> int:
 
 
 def _parse_col_def(col_def: str) -> tuple[str, str, bool] | None:
-    """Parse a single column definition. Returns (col_name, spanner_type, not_null) or None."""
+    """Parse a single Spanner column definition string.
+
+    Args:
+        col_def (str): A single column definition, e.g. "UserId INT64 NOT NULL".
+
+    Returns:
+        tuple[str, str, bool] | None: A tuple of (col_name, spanner_type, not_null),
+            or None if the string cannot be parsed.
+    """
     # Strip OPTIONS (...)
     d = re.sub(r"\s+OPTIONS\s*\([^)]*\)", "", col_def, flags=re.IGNORECASE).strip()
     # Remove trailing NOT NULL
@@ -193,9 +244,18 @@ def _parse_col_def(col_def: str) -> tuple[str, str, bool] | None:
 
 
 def _rewrite_create_table(stmt: str, schema: str) -> tuple[str, list[str]]:
-    """Rewrite a Spanner CREATE TABLE statement to DuckDB.
+    """Rewrite a Spanner CREATE TABLE statement to a DuckDB-compatible CREATE TABLE statement.
 
-    Returns (duckdb_sql, pk_columns).
+    Args:
+        stmt (str): Spanner CREATE TABLE DDL statement.
+        schema (str): DuckDB schema name to qualify the table with.
+
+    Returns:
+        tuple[str, list[str]]: A tuple of (duckdb_sql, pk_columns) where pk_columns
+            is the list of primary key column names.
+
+    Raises:
+        ValueError: If the CREATE TABLE statement cannot be parsed.
     """
     # Normalize whitespace while preserving structure
     stmt = re.sub(r"\s+", " ", stmt.strip())
@@ -260,9 +320,15 @@ def _rewrite_create_table(stmt: str, schema: str) -> tuple[str, list[str]]:
 
 
 def _rewrite_ddl(stmt: str, schema: str) -> tuple[str, list[str]]:
-    """Rewrite a single Spanner DDL statement to DuckDB SQL.
+    """Rewrite a single Spanner DDL statement to DuckDB-compatible SQL.
 
-    Returns (duckdb_sql, pk_cols) where pk_cols is non-empty only for CREATE TABLE.
+    Args:
+        stmt (str): A single Spanner DDL statement such as CREATE TABLE, ALTER TABLE, or DROP INDEX.
+        schema (str): DuckDB schema name to qualify table and index identifiers with.
+
+    Returns:
+        tuple[str, list[str]]: A tuple of (duckdb_sql, pk_cols) where pk_cols is
+            the list of primary key columns and is non-empty only for CREATE TABLE.
     """
     s = stmt.strip()
     upper = s.upper().lstrip()
@@ -352,14 +418,31 @@ _SELECT_KEYWORDS = ("SELECT", "WITH", "VALUES", "SHOW", "DESCRIBE", "EXPLAIN", "
 
 
 def _is_select(sql: str) -> bool:
+    """Return True if the SQL string is a SELECT-like query rather than a DML statement.
+
+    Args:
+        sql (str): SQL statement to classify.
+
+    Returns:
+        bool: True if the statement begins with a SELECT keyword such as SELECT or WITH.
+    """
     stripped = sql.strip().lstrip("(").upper()
     return any(stripped.startswith(kw) for kw in _SELECT_KEYWORDS)
 
 
 def _rewrite_spanner_sql(sql: str, schema: str) -> tuple[str, list[str]]:
-    """Rewrite Spanner SQL to DuckDB SQL.
+    """Rewrite Spanner SQL to DuckDB-compatible SQL.
 
-    Returns (duckdb_sql, param_names_in_order).
+    Converts @param_name parameters to positional placeholders, backtick identifiers
+    to double-quoted identifiers, and qualifies unqualified table names with the schema.
+
+    Args:
+        sql (str): Spanner SQL statement to rewrite.
+        schema (str): DuckDB schema name used to qualify unqualified table references.
+
+    Returns:
+        tuple[str, list[str]]: A tuple of (duckdb_sql, param_names_in_order) where
+            param_names_in_order lists each @param_name in the order it appeared.
     """
     param_names: list[str] = []
 
@@ -418,7 +501,10 @@ class SpannerEngine:
     """Single DuckDB connection backing the Cloud Spanner emulator."""
 
     def __init__(self) -> None:
-        """Initialize the engine with an in-memory or file-backed DuckDB connection."""
+        """Initialize the engine with an in-memory or file-backed DuckDB connection.
+
+        Uses CLOUDBOX_DATA_DIR to determine the database path; falls back to in-memory.
+        """
         if settings.data_dir:
             self._db_path = str(Path(settings.data_dir) / "spanner.duckdb")
         else:
@@ -444,13 +530,28 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def _exec(self, sql: str, params: list | None = None) -> None:
+        """Execute a SQL statement that returns no meaningful result.
+
+        Args:
+            sql (str): SQL statement to execute.
+            params (list | None): Positional parameters to bind, or None for no parameters.
+        """
         with self._lock:
             self._conn.execute(sql, params or [])
 
     def _select(
         self, sql: str, params: list | None = None
     ) -> tuple[list[tuple[str, str]], list[tuple]]:
-        """Execute a SELECT and return ([(col_name, duck_type), ...], rows)."""
+        """Execute a SELECT statement and return column metadata with rows.
+
+        Args:
+            sql (str): SQL statement to execute.
+            params (list | None): Positional parameters to bind, or None for no parameters.
+
+        Returns:
+            tuple[list[tuple[str, str]], list[tuple]]: A tuple of
+                ([(col_name, duck_type), ...], rows) where each row is a tuple of raw values.
+        """
         with self._lock:
             self._conn.execute(sql, params or [])
             desc = self._conn.description or []
@@ -459,6 +560,15 @@ class SpannerEngine:
         return columns, rows
 
     def _schema_name(self, instance_id: str, database_id: str) -> str:
+        """Return the DuckDB schema name for a Spanner database.
+
+        Args:
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+
+        Returns:
+            str: DuckDB schema name in the form instance_id__database_id.
+        """
         return f"{instance_id}__{database_id}"
 
     def reset(self) -> None:
@@ -479,7 +589,14 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def list_instance_configs(self, project: str) -> list[dict]:
-        """Return a stub list of available instance configurations."""
+        """Return a stub list of available instance configurations.
+
+        Args:
+            project (str): GCP project ID.
+
+        Returns:
+            list[dict]: List containing a single regional-us-central1 configuration entry.
+        """
         return [
             {
                 "name": f"projects/{project}/instanceConfigs/regional-us-central1",
@@ -493,7 +610,19 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def create_instance(self, project: str, instance_id: str, body: dict) -> dict:
-        """Create a new Spanner instance and return a completed LRO."""
+        """Create a new Spanner instance and return a completed LRO.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Unique identifier for the new instance.
+            body (dict): Instance resource fields such as displayName, nodeCount, and labels.
+
+        Returns:
+            dict: A completed long-running operation dict with the created instance in response.
+
+        Raises:
+            ValueError: If an instance with the same ID already exists.
+        """
         key = f"{project}/{instance_id}"
         if key in self._instances:
             raise ValueError(f"Instance already exists: {instance_id}")
@@ -524,16 +653,43 @@ class SpannerEngine:
         return op
 
     def get_instance(self, project: str, instance_id: str) -> dict | None:
-        """Return instance metadata or None if not found."""
+        """Return instance metadata or None if not found.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+
+        Returns:
+            dict | None: Instance metadata dict, or None if the instance does not exist.
+        """
         return self._instances.get(f"{project}/{instance_id}")
 
     def list_instances(self, project: str) -> list[dict]:
-        """Return all instance metadata dicts for the given project."""
+        """Return all instance metadata dicts for the given project.
+
+        Args:
+            project (str): GCP project ID.
+
+        Returns:
+            list[dict]: List of instance metadata dicts belonging to the project.
+        """
         prefix = f"{project}/"
         return [v for k, v in self._instances.items() if k.startswith(prefix)]
 
     def update_instance(self, project: str, instance_id: str, body: dict) -> dict:
-        """Update instance display name, node count, processing units, or labels."""
+        """Update instance display name, node count, processing units, or labels.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            body (dict): Update body; may contain an "instance" sub-key with the fields to update.
+
+        Returns:
+            dict: Updated instance metadata dict.
+
+        Raises:
+            ValueError: If the instance does not exist.
+        """
         key = f"{project}/{instance_id}"
         meta = self._instances.get(key)
         if meta is None:
@@ -546,7 +702,15 @@ class SpannerEngine:
         return meta
 
     def delete_instance(self, project: str, instance_id: str) -> bool:
-        """Delete an instance and all its databases; return False if not found."""
+        """Delete an instance and all its databases.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+
+        Returns:
+            bool: True if the instance was deleted, False if it did not exist.
+        """
         key = f"{project}/{instance_id}"
         if key not in self._instances:
             return False
@@ -564,7 +728,11 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def _drop_database_schema(self, db_key: str) -> None:
-        """Drop the DuckDB schema for a database key."""
+        """Drop the DuckDB schema for a database key.
+
+        Args:
+            db_key (str): Internal database key in the form project/instance/databases/database.
+        """
         db = self._databases.get(db_key)
         if db is None:
             return
@@ -586,7 +754,20 @@ class SpannerEngine:
     def create_database(
         self, project: str, instance_id: str, database_id: str, extra_statements: list[str]
     ) -> dict:
-        """Create a database, apply extra DDL statements, and return a completed LRO."""
+        """Create a database, apply extra DDL statements, and return a completed LRO.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Unique identifier for the new database.
+            extra_statements (list[str]): DDL statements to apply after database creation.
+
+        Returns:
+            dict: A completed long-running operation dict with the created database in response.
+
+        Raises:
+            ValueError: If the instance does not exist or the database already exists.
+        """
         inst_key = f"{project}/{instance_id}"
         if inst_key not in self._instances:
             raise ValueError(f"Instance not found: {instance_id}")
@@ -644,16 +825,42 @@ class SpannerEngine:
         return op
 
     def get_database(self, project: str, instance_id: str, database_id: str) -> dict | None:
-        """Return database metadata or None if not found."""
+        """Return database metadata or None if not found.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+
+        Returns:
+            dict | None: Database metadata dict, or None if the database does not exist.
+        """
         return self._databases.get(f"{project}/{instance_id}/databases/{database_id}")
 
     def list_databases(self, project: str, instance_id: str) -> list[dict]:
-        """Return all database metadata dicts for the given instance."""
+        """Return all database metadata dicts for the given instance.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+
+        Returns:
+            list[dict]: List of database metadata dicts belonging to the instance.
+        """
         prefix = f"{project}/{instance_id}/databases/"
         return [v for k, v in self._databases.items() if k.startswith(prefix)]
 
     def delete_database(self, project: str, instance_id: str, database_id: str) -> bool:
-        """Delete a database and drop its DuckDB schema; return False if not found."""
+        """Delete a database and drop its DuckDB schema.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+
+        Returns:
+            bool: True if the database was deleted, False if it did not exist.
+        """
         db_key = f"{project}/{instance_id}/databases/{database_id}"
         if db_key not in self._databases:
             return False
@@ -665,7 +872,20 @@ class SpannerEngine:
     def execute_ddl(
         self, project: str, instance_id: str, database_id: str, statements: list[str]
     ) -> dict:
-        """Execute DDL statements against DuckDB and record them in the DDL history."""
+        """Execute DDL statements against DuckDB and record them in the DDL history.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+            statements (list[str]): List of Spanner DDL statements to execute.
+
+        Returns:
+            dict: A completed long-running operation dict with the executed statements in metadata.
+
+        Raises:
+            ValueError: If the database does not exist or any DDL statement fails.
+        """
         db_key = f"{project}/{instance_id}/databases/{database_id}"
         if db_key not in self._databases:
             raise ValueError(f"Database not found: {database_id}")
@@ -704,7 +924,16 @@ class SpannerEngine:
         return op
 
     def get_database_ddl(self, project: str, instance_id: str, database_id: str) -> list[str]:
-        """Return the list of DDL statements applied to a database."""
+        """Return the list of DDL statements applied to a database.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+
+        Returns:
+            list[str]: Ordered list of DDL statements that have been executed against the database.
+        """
         db_key = f"{project}/{instance_id}/databases/{database_id}"
         return self._ddl_statements.get(db_key, [])
 
@@ -715,6 +944,18 @@ class SpannerEngine:
     def _session_resource(
         self, project: str, instance_id: str, database_id: str, session_id: str
     ) -> str:
+        """Build the full resource name for a session.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+            session_id (str): Session UUID string.
+
+        Returns:
+            str: Full session resource name such as
+                projects/P/instances/I/databases/D/sessions/S.
+        """
         return (
             f"projects/{project}/instances/{instance_id}"
             f"/databases/{database_id}/sessions/{session_id}"
@@ -723,7 +964,20 @@ class SpannerEngine:
     def create_session(
         self, project: str, instance_id: str, database_id: str, labels: dict | None = None
     ) -> dict:
-        """Create a new session for a database and return its metadata."""
+        """Create a new session for a database and return its metadata.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+            labels (dict | None): Optional key-value labels to attach to the session.
+
+        Returns:
+            dict: Session metadata dict without internal underscore-prefixed keys.
+
+        Raises:
+            ValueError: If the database does not exist.
+        """
         db_key = f"{project}/{instance_id}/databases/{database_id}"
         if db_key not in self._databases:
             raise ValueError(f"Database not found: {database_id}")
@@ -743,14 +997,31 @@ class SpannerEngine:
         return {k: v for k, v in meta.items() if not k.startswith("_")}
 
     def get_session(self, session_name: str) -> dict | None:
-        """Return session metadata (excluding internal keys) or None if not found."""
+        """Return session metadata excluding internal keys, or None if not found.
+
+        Args:
+            session_name (str): Full session resource name.
+
+        Returns:
+            dict | None: Session metadata dict without internal underscore-prefixed keys,
+                or None if the session does not exist.
+        """
         meta = self._sessions.get(session_name)
         if meta is None:
             return None
         return {k: v for k, v in meta.items() if not k.startswith("_")}
 
     def list_sessions(self, project: str, instance_id: str, database_id: str) -> list[dict]:
-        """Return all sessions for a database, excluding internal keys."""
+        """Return all sessions for a database, excluding internal keys.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+
+        Returns:
+            list[dict]: List of session metadata dicts without internal underscore-prefixed keys.
+        """
         prefix = f"projects/{project}/instances/{instance_id}/databases/{database_id}/sessions/"
         return [
             {k: v for k, v in meta.items() if not k.startswith("_")}
@@ -759,7 +1030,14 @@ class SpannerEngine:
         ]
 
     def delete_session(self, session_name: str) -> bool:
-        """Delete a session; return False if not found."""
+        """Delete a session.
+
+        Args:
+            session_name (str): Full session resource name.
+
+        Returns:
+            bool: True if the session was deleted, False if it did not exist.
+        """
         if session_name not in self._sessions:
             return False
         del self._sessions[session_name]
@@ -773,19 +1051,51 @@ class SpannerEngine:
         count: int,
         labels: dict | None = None,
     ) -> list[dict]:
-        """Create multiple sessions for a database in a single call."""
+        """Create multiple sessions for a database in a single call.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+            count (int): Number of sessions to create.
+            labels (dict | None): Optional key-value labels to attach to each session.
+
+        Returns:
+            list[dict]: List of session metadata dicts, one per created session.
+        """
         return [
             self.create_session(project, instance_id, database_id, labels) for _ in range(count)
         ]
 
     def _session_schema(self, session_name: str) -> str:
-        """Get the DuckDB schema for a session's database."""
+        """Get the DuckDB schema name for a session's database.
+
+        Args:
+            session_name (str): Full session resource name.
+
+        Returns:
+            str: DuckDB schema name for the session's database.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         meta = self._sessions.get(session_name)
         if meta is None:
             raise ValueError(f"Session not found: {session_name}")
         return self._schema_name(meta["_instance"], meta["_database"])
 
     def _session_db_key(self, session_name: str) -> tuple[str, str, str]:
+        """Return the (project, instance_id, database_id) tuple for a session.
+
+        Args:
+            session_name (str): Full session resource name.
+
+        Returns:
+            tuple[str, str, str]: A tuple of (project, instance_id, database_id).
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         meta = self._sessions.get(session_name)
         if meta is None:
             raise ValueError(f"Session not found: {session_name}")
@@ -796,7 +1106,18 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def begin_transaction(self, session_name: str, options: dict) -> dict:
-        """Begin a transaction on a session and return the transaction ID."""
+        """Begin a transaction on a session and return the transaction ID.
+
+        Args:
+            session_name (str): Full session resource name.
+            options (dict): Transaction options, e.g. {"readOnly": {}} or {"readWrite": {}}.
+
+        Returns:
+            dict: Transaction dict with an "id" field and optionally a "readTimestamp".
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         if session_name not in self._sessions:
             raise ValueError(f"Session not found: {session_name}")
         txn_id = base64.b64encode(str(uuid.uuid4()).encode()).decode()
@@ -807,7 +1128,12 @@ class SpannerEngine:
         return txn
 
     def rollback(self, session_name: str, transaction_id: str) -> None:
-        """Roll back a transaction by removing it from the active set."""
+        """Roll back a transaction by removing it from the active set.
+
+        Args:
+            session_name (str): Full session resource name.
+            transaction_id (str): Base64-encoded transaction ID to roll back.
+        """
         self._transactions.pop(transaction_id, None)
 
     # -------------------------------------------------------------------------
@@ -815,7 +1141,14 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def _coerce_value(self, v: Any) -> Any:
-        """Try to coerce a Spanner API value to a Python type DuckDB can accept."""
+        """Try to coerce a Spanner API value to a Python type DuckDB can accept.
+
+        Args:
+            v (Any): Value from the Spanner API wire format.
+
+        Returns:
+            Any: Python value suitable for DuckDB parameter binding.
+        """
         if v is None:
             return None
         if isinstance(v, bool):
@@ -835,6 +1168,14 @@ class SpannerEngine:
     def _apply_insert(
         self, schema: str, table: str, columns: list[str], values: list[list]
     ) -> None:
+        """Insert rows into a DuckDB table.
+
+        Args:
+            schema (str): DuckDB schema name.
+            table (str): Table name within the schema.
+            columns (list[str]): Column names in the order they appear in each row.
+            values (list[list]): List of rows; each row is a list of Spanner API values.
+        """
         col_names = ", ".join(f'"{c}"' for c in columns)
         placeholders = ", ".join("?" for _ in columns)
         for row in values:
@@ -847,6 +1188,14 @@ class SpannerEngine:
     def _apply_update(
         self, schema: str, table: str, columns: list[str], values: list[list]
     ) -> None:
+        """Update rows in a DuckDB table using primary key columns.
+
+        Args:
+            schema (str): DuckDB schema name.
+            table (str): Table name within the schema.
+            columns (list[str]): Column names in the order they appear in each row.
+            values (list[list]): List of rows; each row is a list of Spanner API values.
+        """
         pk_key = f'"{schema}"."{table}"'
         pk_cols = self._table_pks.get(pk_key, [])
 
@@ -884,6 +1233,14 @@ class SpannerEngine:
     def _apply_insert_or_update(
         self, schema: str, table: str, columns: list[str], values: list[list]
     ) -> None:
+        """Upsert rows into a DuckDB table using an INSERT ... ON CONFLICT DO UPDATE strategy.
+
+        Args:
+            schema (str): DuckDB schema name.
+            table (str): Table name within the schema.
+            columns (list[str]): Column names in the order they appear in each row.
+            values (list[list]): List of rows; each row is a list of Spanner API values.
+        """
         pk_key = f'"{schema}"."{table}"'
         pk_cols = self._table_pks.get(pk_key, columns[:1])  # fallback: first col as PK
 
@@ -906,6 +1263,13 @@ class SpannerEngine:
             )
 
     def _apply_delete(self, schema: str, table: str, key_set: dict) -> None:
+        """Delete rows from a DuckDB table based on a Spanner key set.
+
+        Args:
+            schema (str): DuckDB schema name.
+            table (str): Table name within the schema.
+            key_set (dict): Spanner KeySet dict with optional "all", "keys", and "ranges" fields.
+        """
         pk_key = f'"{schema}"."{table}"'
         pk_cols = self._table_pks.get(pk_key, [])
 
@@ -968,7 +1332,20 @@ class SpannerEngine:
         mutations: list[dict],
         transaction_id: str | None = None,
     ) -> dict:
-        """Apply mutations to DuckDB and commit the transaction."""
+        """Apply mutations to DuckDB and commit the transaction.
+
+        Args:
+            session_name (str): Full session resource name.
+            mutations (list[dict]): List of Spanner mutation dicts with keys such as
+                "insert", "update", "insertOrUpdate", "replace", or "delete".
+            transaction_id (str | None): Optional transaction ID to close after committing.
+
+        Returns:
+            dict: Commit response dict with a "commitTimestamp" field.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         if session_name not in self._sessions:
             raise ValueError(f"Session not found: {session_name}")
 
@@ -1008,7 +1385,22 @@ class SpannerEngine:
         limit: int = 0,
         index: str = "",
     ) -> dict:
-        """Read columns from a table using a key set and return a Spanner result set."""
+        """Read columns from a table using a key set and return a Spanner result set.
+
+        Args:
+            session_name (str): Full session resource name.
+            table (str): Spanner table name to read from.
+            columns (list[str]): Column names to return.
+            key_set (dict): Spanner KeySet dict with optional "all", "keys", and "ranges" fields.
+            limit (int): Maximum number of rows to return; 0 means no limit.
+            index (str): Optional secondary index name (currently unused).
+
+        Returns:
+            dict: Spanner ResultSet dict with "metadata" and "rows" fields.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         schema = self._session_schema(session_name)
         col_str = ", ".join(f'"{c}"' for c in columns)
         limit_clause = f" LIMIT {limit}" if limit > 0 else ""
@@ -1077,7 +1469,17 @@ class SpannerEngine:
         rows: list[tuple],
         col_names: list[str] | None = None,
     ) -> dict:
-        """Build a Spanner ResultSet from DuckDB result columns and rows."""
+        """Build a Spanner ResultSet from DuckDB result columns and rows.
+
+        Args:
+            duck_cols (list[tuple[str, str]]): List of (column_name, duck_type) pairs from DuckDB.
+            rows (list[tuple]): Raw row tuples returned by DuckDB.
+            col_names (list[str] | None): Optional override for display column names; falls back
+                to the DuckDB column names when not provided.
+
+        Returns:
+            dict: Spanner ResultSet dict with "metadata" and "rows" fields.
+        """
         fields = []
         spanner_types = []
         for i, (name, duck_type) in enumerate(duck_cols):
@@ -1100,7 +1502,16 @@ class SpannerEngine:
         }
 
     def _resolve_params(self, param_names: list[str], params: dict, param_types: dict) -> list[Any]:
-        """Convert @param_name params to positional list for DuckDB."""
+        """Convert named Spanner parameters to a positional list for DuckDB.
+
+        Args:
+            param_names (list[str]): Parameter names in the order they appear in the SQL.
+            params (dict): Map of parameter name to Spanner API value.
+            param_types (dict): Map of parameter name to Spanner type descriptor dict.
+
+        Returns:
+            list[Any]: Positional parameter values coerced to Python types DuckDB can accept.
+        """
         result = []
         for name in param_names:
             v = params.get(name)
@@ -1135,7 +1546,22 @@ class SpannerEngine:
         param_types: dict | None = None,
         transaction: dict | None = None,
     ) -> dict:
-        """Execute a SQL query or DML against DuckDB and return a Spanner result set."""
+        """Execute a SQL query or DML against DuckDB and return a Spanner result set.
+
+        Args:
+            session_name (str): Full session resource name.
+            sql (str): Spanner SQL statement to execute.
+            params (dict | None): Named parameter values keyed by parameter name.
+            param_types (dict | None): Spanner type descriptors keyed by parameter name.
+            transaction (dict | None): Unused transaction context (reserved for future use).
+
+        Returns:
+            dict: Spanner ResultSet dict; SELECT queries include "rows", DML queries
+                include a "stats" dict with "rowCountExact".
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         schema = self._session_schema(session_name)
         rewritten, param_names = _rewrite_spanner_sql(sql, schema)
         positional = self._resolve_params(param_names, params or {}, param_types or {})
@@ -1159,7 +1585,18 @@ class SpannerEngine:
         params: dict | None = None,
         param_types: dict | None = None,
     ) -> Iterator[str]:
-        """Yield newline-delimited JSON PartialResultSet objects."""
+        """Yield newline-delimited JSON PartialResultSet objects for a SQL query.
+
+        Args:
+            session_name (str): Full session resource name.
+            sql (str): Spanner SQL statement to execute.
+            params (dict | None): Named parameter values keyed by parameter name.
+            param_types (dict | None): Spanner type descriptors keyed by parameter name.
+
+        Returns:
+            Iterator[str]: Iterator of newline-terminated JSON strings, each representing
+                a PartialResultSet with metadata and flattened row values.
+        """
         result = self.execute_sql(session_name, sql, params, param_types)
         fields = result.get("metadata", {}).get("rowType", {}).get("fields", [])
         rows = result.get("rows", [])
@@ -1179,7 +1616,19 @@ class SpannerEngine:
         session_name: str,
         statements: list[dict],
     ) -> dict:
-        """Execute a batch of DML statements and return per-statement row counts."""
+        """Execute a batch of DML statements and return per-statement row counts.
+
+        Args:
+            session_name (str): Full session resource name.
+            statements (list[dict]): List of statement dicts each containing "sql",
+                optional "params", and optional "paramTypes" fields.
+
+        Returns:
+            dict: Dict with "resultSets" (one entry per statement) and a "status" field.
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
         schema = self._session_schema(session_name)
         result_sets = []
         for stmt_body in statements:
@@ -1212,7 +1661,14 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def get_operation(self, op_name: str) -> dict | None:
-        """Return a stored LRO record or None if not found."""
+        """Return a stored LRO record or None if not found.
+
+        Args:
+            op_name (str): Full operation resource name.
+
+        Returns:
+            dict | None: Operation dict, or None if the operation is not tracked.
+        """
         return self._operations.get(op_name)
 
     # -------------------------------------------------------------------------
@@ -1220,7 +1676,17 @@ class SpannerEngine:
     # -------------------------------------------------------------------------
 
     def list_tables(self, project: str, instance_id: str, database_id: str) -> list[str]:
-        """Return the table names in a database's DuckDB schema."""
+        """Return the table names in a database's DuckDB schema.
+
+        Args:
+            project (str): GCP project ID.
+            instance_id (str): Spanner instance identifier.
+            database_id (str): Spanner database identifier.
+
+        Returns:
+            list[str]: Table names found in the database schema, or an empty list if the
+                database does not exist or an error occurs.
+        """
         db_key = f"{project}/{instance_id}/databases/{database_id}"
         if db_key not in self._databases:
             return []
@@ -1243,5 +1709,9 @@ _engine = SpannerEngine()
 
 
 def get_engine() -> SpannerEngine:
-    """Return the module-level SpannerEngine singleton."""
+    """Return the module-level SpannerEngine singleton.
+
+    Returns:
+        SpannerEngine: The shared engine instance used by all route handlers.
+    """
     return _engine

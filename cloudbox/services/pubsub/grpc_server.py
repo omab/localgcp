@@ -39,18 +39,33 @@ logger = logging.getLogger("cloudbox.pubsub.grpc")
 
 
 def _types():
+    """Lazily import and return the proto-plus pubsub types module.
+
+    Returns:
+        module: google.pubsub_v1.types.pubsub module.
+    """
     from google.pubsub_v1.types import pubsub as t
 
     return t
 
 
 def _schema_types():
+    """Lazily import and return the proto-plus schema types module.
+
+    Returns:
+        module: google.pubsub_v1.types.schema module.
+    """
     from google.pubsub_v1.types import schema as st
 
     return st
 
 
 def _now() -> str:
+    """Return the current UTC time as an ISO 8601 string with millisecond precision.
+
+    Returns:
+        str: Current UTC timestamp formatted as 'YYYY-MM-DDTHH:MM:SS.mmmZ'.
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
@@ -60,6 +75,14 @@ def _now() -> str:
 
 
 def _ser_empty(e) -> bytes:
+    """Serialize an Empty protobuf message to bytes.
+
+    Args:
+        e: Unused Empty message instance.
+
+    Returns:
+        bytes: Always returns an empty bytes object.
+    """
     return b""
 
 
@@ -69,6 +92,14 @@ def _ser_empty(e) -> bytes:
 
 
 def _topic_to_proto(data: dict):
+    """Convert a topic store dict to a proto-plus Topic message.
+
+    Args:
+        data (dict): Topic resource dict from the NamespacedStore.
+
+    Returns:
+        Topic: Proto-plus Topic message populated from the dict.
+    """
     t = _types()
     st = _schema_types()
     topic = t.Topic(name=data["name"], labels=data.get("labels", {}))
@@ -84,6 +115,14 @@ def _topic_to_proto(data: dict):
 
 
 def _topic_to_dict(proto) -> dict:
+    """Convert a proto-plus Topic message to a store-compatible dict.
+
+    Args:
+        proto: Proto-plus Topic message to convert.
+
+    Returns:
+        dict: Topic resource dict suitable for storing in the NamespacedStore.
+    """
     d = {
         "name": proto.name,
         "labels": dict(proto.labels),
@@ -97,6 +136,14 @@ def _topic_to_dict(proto) -> dict:
 
 
 def _sub_to_proto(data: dict):
+    """Convert a subscription store dict to a proto-plus Subscription message.
+
+    Args:
+        data (dict): Subscription resource dict from the NamespacedStore.
+
+    Returns:
+        Subscription: Proto-plus Subscription message populated from the dict.
+    """
     t = _types()
     return t.Subscription(
         name=data["name"],
@@ -109,6 +156,14 @@ def _sub_to_proto(data: dict):
 
 
 def _sub_to_dict(proto) -> dict:
+    """Convert a proto-plus Subscription message to a store-compatible dict.
+
+    Args:
+        proto: Proto-plus Subscription message to convert.
+
+    Returns:
+        dict: Subscription resource dict suitable for storing in the NamespacedStore.
+    """
     return {
         "name": proto.name,
         "topic": proto.topic,
@@ -127,6 +182,15 @@ def _sub_to_dict(proto) -> dict:
 
 
 async def _create_topic(request, context):
+    """Handle CreateTopic gRPC call.
+
+    Args:
+        request: Proto-plus Topic message containing the topic name and settings.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Topic: The created or existing proto-plus Topic message.
+    """
     store = ps_store.get_store()
     existing = store.get("topics", request.name)
     if existing:
@@ -138,6 +202,15 @@ async def _create_topic(request, context):
 
 
 async def _get_topic(request, context):
+    """Handle GetTopic gRPC call.
+
+    Args:
+        request: GetTopicRequest proto-plus message with the topic resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Topic: The matching proto-plus Topic message, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     data = store.get("topics", request.topic)
     if data is None:
@@ -147,6 +220,15 @@ async def _get_topic(request, context):
 
 
 async def _update_topic(request, context):
+    """Handle UpdateTopic gRPC call.
+
+    Args:
+        request: UpdateTopicRequest proto-plus message with updated topic fields and update_mask.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Topic: The updated proto-plus Topic message, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     data = store.get("topics", request.topic.name)
     if data is None:
@@ -160,6 +242,15 @@ async def _update_topic(request, context):
 
 
 async def _list_topics(request, context):
+    """Handle ListTopics gRPC call.
+
+    Args:
+        request: ListTopicsRequest proto-plus message with project and pagination fields.
+        context: gRPC servicer context (unused for list operations).
+
+    Returns:
+        ListTopicsResponse: Proto-plus response containing the page of topics.
+    """
     t = _types()
     store = ps_store.get_store()
     prefix = f"{request.project}/topics/"
@@ -172,6 +263,15 @@ async def _list_topics(request, context):
 
 
 async def _delete_topic(request, context):
+    """Handle DeleteTopic gRPC call.
+
+    Args:
+        request: DeleteTopicRequest proto-plus message with the topic resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.delete("topics", request.topic):
         await context.abort(grpc.StatusCode.NOT_FOUND, f"Topic not found: {request.topic}")
@@ -185,6 +285,15 @@ async def _delete_topic(request, context):
 
 
 async def _publish(request, context):
+    """Handle Publish gRPC call.
+
+    Args:
+        request: PublishRequest proto-plus message with the topic name and messages list.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        PublishResponse: Proto-plus response containing the assigned message IDs.
+    """
     t = _types()
     store = ps_store.get_store()
     if not store.exists("topics", request.topic):
@@ -215,6 +324,15 @@ async def _publish(request, context):
 
 
 async def _list_topic_subscriptions(request, context):
+    """Handle ListTopicSubscriptions gRPC call.
+
+    Args:
+        request: ListTopicSubscriptionsRequest proto-plus message with topic name and pagination.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        ListTopicSubscriptionsResponse: Proto-plus response with subscription names for the topic.
+    """
     t = _types()
     store = ps_store.get_store()
     if not store.exists("topics", request.topic):
@@ -234,6 +352,15 @@ async def _list_topic_subscriptions(request, context):
 
 
 async def _create_subscription(request, context):
+    """Handle CreateSubscription gRPC call.
+
+    Args:
+        request: Proto-plus Subscription message with the subscription name, topic, and settings.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Subscription: The created or existing proto-plus Subscription message.
+    """
     store = ps_store.get_store()
     existing = store.get("subscriptions", request.name)
     if existing:
@@ -249,6 +376,15 @@ async def _create_subscription(request, context):
 
 
 async def _get_subscription(request, context):
+    """Handle GetSubscription gRPC call.
+
+    Args:
+        request: GetSubscriptionRequest proto-plus message with the subscription resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Subscription: The matching proto-plus Subscription message, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     data = store.get("subscriptions", request.subscription)
     if data is None:
@@ -260,6 +396,15 @@ async def _get_subscription(request, context):
 
 
 async def _update_subscription(request, context):
+    """Handle UpdateSubscription gRPC call.
+
+    Args:
+        request: UpdateSubscriptionRequest proto-plus message with updated fields and update_mask.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Subscription: The updated proto-plus Subscription message, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     data = store.get("subscriptions", request.subscription.name)
     if data is None:
@@ -277,6 +422,15 @@ async def _update_subscription(request, context):
 
 
 async def _list_subscriptions(request, context):
+    """Handle ListSubscriptions gRPC call.
+
+    Args:
+        request: ListSubscriptionsRequest proto-plus message with project and pagination fields.
+        context: gRPC servicer context (unused for list operations).
+
+    Returns:
+        ListSubscriptionsResponse: Proto-plus response containing the page of subscriptions.
+    """
     t = _types()
     store = ps_store.get_store()
     prefix = f"{request.project}/subscriptions/"
@@ -289,6 +443,15 @@ async def _list_subscriptions(request, context):
 
 
 async def _delete_subscription(request, context):
+    """Handle DeleteSubscription gRPC call.
+
+    Args:
+        request: DeleteSubscriptionRequest proto-plus message with the subscription resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.delete("subscriptions", request.subscription):
         await context.abort(
@@ -301,6 +464,15 @@ async def _delete_subscription(request, context):
 
 
 async def _pull(request, context):
+    """Handle Pull gRPC call.
+
+    Args:
+        request: PullRequest proto-plus message with subscription name and max_messages.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        PullResponse: Proto-plus response containing the received messages.
+    """
     t = _types()
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
@@ -332,6 +504,15 @@ async def _pull(request, context):
 
 
 async def _acknowledge(request, context):
+    """Handle Acknowledge gRPC call.
+
+    Args:
+        request: AcknowledgeRequest proto-plus message with subscription name and ack_ids.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
         await context.abort(
@@ -343,6 +524,16 @@ async def _acknowledge(request, context):
 
 
 async def _modify_ack_deadline(request, context):
+    """Handle ModifyAckDeadline gRPC call.
+
+    Args:
+        request: ModifyAckDeadlineRequest proto-plus message with subscription, ack_ids,
+            and ack_deadline_seconds.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
         await context.abort(
@@ -356,6 +547,16 @@ async def _modify_ack_deadline(request, context):
 
 
 async def _create_snapshot(request, context):
+    """Handle CreateSnapshot gRPC call.
+
+    Args:
+        request: CreateSnapshotRequest proto-plus message with the snapshot name, subscription,
+            and optional labels.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Snapshot: Proto-plus Snapshot message on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.exists("subscriptions", request.subscription):
         await context.abort(
@@ -376,6 +577,15 @@ async def _create_snapshot(request, context):
 
 
 async def _get_snapshot(request, context):
+    """Handle GetSnapshot gRPC call.
+
+    Args:
+        request: GetSnapshotRequest proto-plus message with the snapshot resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Snapshot: The matching proto-plus Snapshot message, or aborts with NOT_FOUND.
+    """
     t = _types()
     store = ps_store.get_store()
     data = store.get("snapshots", request.snapshot)
@@ -386,6 +596,15 @@ async def _get_snapshot(request, context):
 
 
 async def _list_snapshots(request, context):
+    """Handle ListSnapshots gRPC call.
+
+    Args:
+        request: ListSnapshotsRequest proto-plus message with project and pagination fields.
+        context: gRPC servicer context (unused for list operations).
+
+    Returns:
+        ListSnapshotsResponse: Proto-plus response containing the page of snapshots.
+    """
     t = _types()
     store = ps_store.get_store()
     prefix = f"{request.project}/snapshots/"
@@ -402,6 +621,15 @@ async def _list_snapshots(request, context):
 
 
 async def _delete_snapshot(request, context):
+    """Handle DeleteSnapshot gRPC call.
+
+    Args:
+        request: DeleteSnapshotRequest proto-plus message with the snapshot resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.delete("snapshots", request.snapshot):
         await context.abort(grpc.StatusCode.NOT_FOUND, f"Snapshot not found: {request.snapshot}")
@@ -410,6 +638,16 @@ async def _delete_snapshot(request, context):
 
 
 async def _seek(request, context):
+    """Handle Seek gRPC call.
+
+    Args:
+        request: SeekRequest proto-plus message with the subscription name and either
+            a snapshot name or a timestamp.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        SeekResponse: Proto-plus SeekResponse on success, or aborts with an error code.
+    """
     t = _types()
     store = ps_store.get_store()
     sub_data = store.get("subscriptions", request.subscription)
@@ -447,13 +685,28 @@ async def _seek(request, context):
 
 
 def _schema_type_name(type_val) -> str:
-    """Convert a proto-plus Schema.Type enum value to its string name."""
+    """Convert a proto-plus Schema.Type enum value to its string name.
+
+    Args:
+        type_val: Proto-plus Schema.Type enum value or equivalent object.
+
+    Returns:
+        str: String name of the enum value, such as 'AVRO' or 'PROTOCOL_BUFFER'.
+    """
     if hasattr(type_val, "name"):
         return type_val.name
     return str(type_val)
 
 
 def _dict_to_schema_proto(data: dict):
+    """Convert a schema store dict to a proto-plus Schema message.
+
+    Args:
+        data (dict): Schema resource dict from the NamespacedStore.
+
+    Returns:
+        Schema: Proto-plus Schema message populated from the dict.
+    """
     st = _schema_types()
     try:
         schema_type = st.Schema.Type[data["type"]]
@@ -463,6 +716,16 @@ def _dict_to_schema_proto(data: dict):
 
 
 async def _create_schema(request, context):
+    """Handle CreateSchema gRPC call.
+
+    Args:
+        request: CreateSchemaRequest proto-plus message with parent, schema_id, and schema body.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Schema: The created proto-plus Schema message, or aborts with ALREADY_EXISTS or
+        INVALID_ARGUMENT.
+    """
     from cloudbox.services.pubsub.models import validate_schema_definition
 
     store = ps_store.get_store()
@@ -495,6 +758,15 @@ async def _create_schema(request, context):
 
 
 async def _get_schema_grpc(request, context):
+    """Handle GetSchema gRPC call.
+
+    Args:
+        request: GetSchemaRequest proto-plus message with the schema resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Schema: The matching proto-plus Schema message, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     data = store.get("schemas", request.name)
     if data is None:
@@ -504,6 +776,15 @@ async def _get_schema_grpc(request, context):
 
 
 async def _list_schemas_grpc(request, context):
+    """Handle ListSchemas gRPC call.
+
+    Args:
+        request: ListSchemasRequest proto-plus message with parent and pagination fields.
+        context: gRPC servicer context (unused for list operations).
+
+    Returns:
+        ListSchemasResponse: Proto-plus response containing the page of schemas.
+    """
     st = _schema_types()
     store = ps_store.get_store()
     prefix = f"{request.parent}/schemas/"
@@ -518,6 +799,15 @@ async def _list_schemas_grpc(request, context):
 
 
 async def _delete_schema_grpc(request, context):
+    """Handle DeleteSchema gRPC call.
+
+    Args:
+        request: DeleteSchemaRequest proto-plus message with the schema resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     store = ps_store.get_store()
     if not store.delete("schemas", request.name):
         await context.abort(grpc.StatusCode.NOT_FOUND, f"Schema not found: {request.name}")
@@ -526,6 +816,15 @@ async def _delete_schema_grpc(request, context):
 
 
 async def _validate_schema_grpc(request, context):
+    """Handle ValidateSchema gRPC call.
+
+    Args:
+        request: ValidateSchemaRequest proto-plus message containing the schema to validate.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        ValidateSchemaResponse: Proto-plus response on success, or aborts with INVALID_ARGUMENT.
+    """
     from cloudbox.services.pubsub.models import validate_schema_definition
 
     st = _schema_types()
@@ -540,6 +839,16 @@ async def _validate_schema_grpc(request, context):
 
 
 async def _validate_message_grpc(request, context):
+    """Handle ValidateMessage gRPC call.
+
+    Args:
+        request: ValidateMessageRequest proto-plus message with the message bytes, encoding,
+            and either an inline schema or a schema resource name.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        ValidateMessageResponse: Proto-plus response on success, or aborts with an error code.
+    """
     from cloudbox.services.pubsub.models import validate_message_against_schema
 
     st = _schema_types()
@@ -574,17 +883,18 @@ async def _validate_message_grpc(request, context):
 
 
 async def _streaming_pull(request_iterator, context):
-    """Bidirectional streaming pull.
+    """Handle the StreamingPull bidirectional streaming gRPC call.
 
-    Protocol:
-    - Client opens the stream and sends an initial StreamingPullRequest with
-      ``subscription`` and ``stream_ack_deadline_seconds``.
-    - Server loops: pull from the in-memory queue, send StreamingPullResponse
-      batches.  When the queue is empty, sleep 50 ms before re-polling.
-    - Subsequent client messages carry ``ack_ids`` / ``modify_deadline_*``
-      fields; a background reader task processes them concurrently.
-    - The stream closes when the client disconnects (StopAsyncIteration on the
-      request iterator) or when a write to the context fails.
+    Protocol: the client opens the stream and sends an initial StreamingPullRequest
+    with subscription and stream_ack_deadline_seconds. The server loops, pulling
+    from the in-memory queue and sending StreamingPullResponse batches. When the
+    queue is empty it sleeps 50 ms before re-polling. Subsequent client messages
+    carry ack_ids and modify_deadline_* fields processed by a background reader task.
+    The stream closes when the client disconnects or a write to the context fails.
+
+    Args:
+        request_iterator: Async iterator of StreamingPullRequest proto-plus messages.
+        context: gRPC servicer context used for writing responses and detecting disconnection.
     """
     t = _types()
     store = ps_store.get_store()
@@ -664,6 +974,17 @@ async def _streaming_pull(request_iterator, context):
 
 
 async def _modify_push_config(request, context):
+    """Handle ModifyPushConfig gRPC call.
+
+    Push delivery is not implemented; this stores the config but does not activate push delivery.
+
+    Args:
+        request: ModifyPushConfigRequest proto-plus message with subscription name and push_config.
+        context: gRPC servicer context for aborting with error codes.
+
+    Returns:
+        Empty: Protobuf Empty on success, or aborts with NOT_FOUND.
+    """
     # Push delivery is not implemented — store the config but do nothing with it
     store = ps_store.get_store()
     data = store.get("subscriptions", request.subscription)
@@ -845,9 +1166,23 @@ class _PubSubRpcHandler(grpc.GenericRpcHandler):
         }
 
     def service_name(self) -> str:
+        """Return an empty service name (multi-service handler).
+
+        Returns:
+            str: Empty string because this handler covers multiple gRPC services.
+        """
         return ""
 
     def service(self, handler_call_details: grpc.HandlerCallDetails):
+        """Look up the RPC method handler for a given gRPC call.
+
+        Args:
+            handler_call_details (grpc.HandlerCallDetails): Details of the incoming RPC call,
+                including the method path.
+
+        Returns:
+            grpc.RpcMethodHandler | None: The matching handler, or None if the method is unknown.
+        """
         handler = self._map.get(handler_call_details.method)
         if handler is None:
             logger.debug("Unhandled gRPC method: %s", handler_call_details.method)
@@ -860,7 +1195,15 @@ class _PubSubRpcHandler(grpc.GenericRpcHandler):
 
 
 async def create_server(host: str, port: int) -> grpc.aio.Server:
-    """Create (but do not start) the Pub/Sub gRPC server."""
+    """Create but do not start the Pub/Sub gRPC server.
+
+    Args:
+        host (str): Hostname or IP address to bind the server to.
+        port (int): Port number to listen on.
+
+    Returns:
+        grpc.aio.Server: Configured but not yet started gRPC server instance.
+    """
     server = grpc.aio.server()
     server.add_generic_rpc_handlers([_PubSubRpcHandler()])
     listen_addr = f"{host}:{port}"

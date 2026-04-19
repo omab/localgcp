@@ -33,7 +33,14 @@ def _now_iso() -> str:
 
 
 def _parse_duration(s: str) -> float:
-    """Parse a GCP duration string like '10s' or '600s' into seconds."""
+    """Parse a GCP duration string into seconds.
+
+    Args:
+        s (str): Duration string such as '10s' or '600s'.
+
+    Returns:
+        float: Number of seconds represented by the duration string.
+    """
     s = s.strip()
     if s.endswith("s"):
         return float(s[:-1])
@@ -89,7 +96,12 @@ def remove_queue(sub_name: str) -> None:
 
 
 def enqueue(sub_name: str, message: dict) -> None:
-    """Add a message to a subscription's queue."""
+    """Add a message to a subscription's queue.
+
+    Args:
+        sub_name (str): Full subscription resource name.
+        message (dict): PubsubMessage dict to enqueue.
+    """
     with _lock:
         q = _queues.get(sub_name)
         if q is not None:
@@ -99,8 +111,15 @@ def enqueue(sub_name: str, message: dict) -> None:
 def pull(sub_name: str, max_messages: int) -> list[tuple[str, dict, int]]:
     """Pull up to max_messages from the queue.
 
-    Returns list of (ack_id, message_dict, delivery_attempt).
-    Moves messages to unacked map with a deadline.
+    Moves messages to the unacked map with a deadline. Expired unacked messages
+    are re-enqueued before pulling.
+
+    Args:
+        sub_name (str): Full subscription resource name.
+        max_messages (int): Maximum number of messages to pull.
+
+    Returns:
+        list[tuple[str, dict, int]]: List of (ack_id, message_dict, delivery_attempt) tuples.
     """
     with _lock:
         q = _queues.get(sub_name, deque())
@@ -232,7 +251,14 @@ def retained_count(topic_name: str) -> int:
 
 
 def _route_to_dlq(dlq_topic: str, message: dict) -> None:
-    """Enqueue a message to all subscriptions of a dead-letter topic (called under _lock)."""
+    """Enqueue a message to all subscriptions of a dead-letter topic.
+
+    Must be called with _lock held.
+
+    Args:
+        dlq_topic (str): Full topic resource name of the dead-letter topic.
+        message (dict): PubsubMessage dict to route to the dead-letter topic.
+    """
     for sub in _store.list("subscriptions"):
         if sub.get("topic") == dlq_topic:
             q = _queues.get(sub["name"])
@@ -248,10 +274,14 @@ _DEFAULT_RETENTION_SECS = 604_800.0  # 7 days
 
 
 def log_to_topic(topic: str, message: dict) -> None:
-    """Append *message* to the topic's message log and prune expired entries.
+    """Append a message to the topic log and prune expired entries.
 
-    The retention window is taken from the topic's ``messageRetentionDuration``
+    The retention window is taken from the topic's messageRetentionDuration
     field (default 7 days).
+
+    Args:
+        topic (str): Full topic resource name.
+        message (dict): PubsubMessage dict to append to the log.
     """
     topic_data = _store.get("topics", topic) or {}
     retention_str = topic_data.get("messageRetentionDuration", "604800s")
@@ -269,9 +299,16 @@ def log_to_topic(topic: str, message: dict) -> None:
 
 
 def _log_since_locked(topic: str, since_iso: str) -> list[dict]:
-    """Return messages from the topic log with publishTime >= *since_iso*.
+    """Return messages from the topic log with publishTime at or after since_iso.
 
-    Must be called with *_lock* held.
+    Must be called with _lock held.
+
+    Args:
+        topic (str): Full topic resource name.
+        since_iso (str): ISO 8601 timestamp; messages published at or after this time are returned.
+
+    Returns:
+        list[dict]: Matching message dicts with internal fields stripped.
     """
     try:
         since_dt = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
@@ -289,9 +326,15 @@ def _log_since_locked(topic: str, since_iso: str) -> list[dict]:
 
 
 def _oldest_publish_time(sub_name: str) -> str:
-    """Return the publishTime of the oldest queued/unacked message, or now.
+    """Return the publishTime of the oldest queued or unacked message, or now if empty.
 
-    Must be called with *_lock* held.
+    Must be called with _lock held.
+
+    Args:
+        sub_name (str): Full subscription resource name.
+
+    Returns:
+        str: ISO 8601 timestamp of the oldest message, or the current time if no messages exist.
     """
     all_msgs: list[dict] = []
     for env in _queues.get(sub_name, deque()):
@@ -308,10 +351,15 @@ def _oldest_publish_time(sub_name: str) -> str:
 
 
 def seek_subscription(sub_name: str, topic: str, since_iso: str) -> None:
-    """Reset *sub_name*'s queue to replay messages published at or after *since_iso*.
+    """Reset a subscription's queue to replay messages published at or after a timestamp.
 
     Clears all in-flight (unacked) messages first, then re-enqueues messages
     from the topic log that pass the subscription's filter expression.
+
+    Args:
+        sub_name (str): Full subscription resource name.
+        topic (str): Full topic resource name the subscription is attached to.
+        since_iso (str): ISO 8601 timestamp; messages at or after this time are replayed.
     """
     from cloudbox.services.pubsub.filter import matches as filter_matches
 
@@ -335,7 +383,12 @@ def seek_subscription(sub_name: str, topic: str, since_iso: str) -> None:
 def create_snapshot(snap_name: str, sub_name: str) -> dict | None:
     """Create a snapshot capturing the subscription's current backlog cursor.
 
-    Returns the snapshot dict, or None if the subscription does not exist.
+    Args:
+        snap_name (str): Full snapshot resource name to create.
+        sub_name (str): Full subscription resource name to snapshot.
+
+    Returns:
+        dict | None: The snapshot dict, or None if the subscription does not exist.
     """
     sub_data = _store.get("subscriptions", sub_name)
     if sub_data is None:

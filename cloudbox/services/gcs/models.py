@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 
 
 def _now_rfc3339() -> str:
+    """Return the current UTC time formatted as an RFC 3339 timestamp string.
+
+    Returns:
+        str: Current UTC time in RFC 3339 format (e.g. "2024-01-15T12:34:56.789Z").
+    """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
@@ -80,7 +85,11 @@ class BucketModel(BaseModel):
     retentionPolicy: RetentionPolicy | None = None
 
     def model_post_init(self, __context: Any) -> None:
-        """Populate derived fields after construction."""
+        """Populate derived fields after construction.
+
+        Args:
+            __context (Any): Pydantic model context passed automatically during initialisation.
+        """
         if not self.id:
             self.id = self.name
         if not self.selfLink:
@@ -110,7 +119,11 @@ class ObjectModel(BaseModel):
     retentionExpirationTime: str = ""
 
     def model_post_init(self, __context: Any) -> None:
-        """Populate derived fields after construction."""
+        """Populate derived fields after construction.
+
+        Args:
+            __context (Any): Pydantic model context passed automatically during initialisation.
+        """
         if not self.id:
             self.id = f"{self.bucket}/{self.name}/1"
         if not self.selfLink:
@@ -166,13 +179,25 @@ class NotificationConfig(BaseModel):
     etag: str = "CAE="
 
     def model_post_init(self, __context: Any) -> None:
-        """Populate derived fields after construction."""
+        """Populate derived fields after construction.
+
+        Args:
+            __context (Any): Pydantic model context passed automatically during initialisation.
+        """
         if not self.selfLink and self.id:
-            # Derive selfLink from topic → bucket is embedded by the caller
+            # Derive selfLink from topic — bucket is embedded by the caller
             pass
 
     def matches(self, event_type: str, object_name: str) -> bool:
-        """Return True if this config should fire for the given event/object."""
+        """Return True if this config should fire for the given event/object.
+
+        Args:
+            event_type (str): GCS event type string (e.g. "OBJECT_FINALIZE").
+            object_name (str): Name of the object triggering the event.
+
+        Returns:
+            bool: True if the notification config matches the event and object name.
+        """
         types = self.event_types or list(_ALL_EVENT_TYPES)
         if event_type not in types:
             return False
@@ -181,7 +206,11 @@ class NotificationConfig(BaseModel):
         return True
 
     def pubsub_topic_name(self) -> str:
-        """Convert the full resource name to a bare projects/.../topics/... path."""
+        """Convert the full resource name to a bare projects/.../topics/... path.
+
+        Returns:
+            str: Bare Pub/Sub topic path with the "//pubsub.googleapis.com/" prefix removed.
+        """
         topic = self.topic
         # Strip "//pubsub.googleapis.com/" prefix if present
         if topic.startswith("//pubsub.googleapis.com/"):
