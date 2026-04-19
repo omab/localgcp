@@ -208,6 +208,9 @@ examples/
     rate_limits.py             Create queue with rate limits, inspect and update via PATCH
   scheduler/
     jobs.py                    Create, pause, resume, delete cron jobs
+  kms/
+    encrypt_decrypt.py         Encrypt/decrypt plaintext, AAD context binding, cross-key rejection
+    key_rotation.py            Add key versions, rotate primary, version lifecycle (disable/destroy/restore)
   logging/
     exclusions.py              Create exclusions, verify filtering at write time
 ```

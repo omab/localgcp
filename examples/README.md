@@ -46,6 +46,9 @@ examples/
     tasks.py                   Create queue, enqueue tasks, list, delete
   scheduler/
     jobs.py                    Create, pause, resume, delete cron jobs
+  kms/
+    encrypt_decrypt.py         Encrypt/decrypt, AAD, cross-key rejection
+    key_rotation.py            Add versions, rotate primary, version lifecycle
 ```
 
 ## Configuration
@@ -64,3 +67,4 @@ All examples read the same environment variables as Cloudbox itself:
 | `CLOUDBOX_TASKS_PORT` | `8123` |
 | `CLOUDBOX_BIGQUERY_PORT` | `9050` |
 | `CLOUDBOX_SCHEDULER_PORT` | `8091` |
+| `CLOUDBOX_KMS_PORT` | `8092` |
