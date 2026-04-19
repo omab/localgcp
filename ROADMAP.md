@@ -19,8 +19,61 @@ real-world applications depend on them.
 | Cloud Datastore | Medium | M | Firestore in Datastore mode uses a different API surface (`datastore.googleapis.com`). Many legacy Python apps use `google-cloud-datastore` directly. The storage model maps cleanly onto the existing Firestore store. |
 | Cloud Bigtable | Medium | L | Wide-column store backed by DuckDB. Row key ranges and column family filtering are the core operations; the gRPC client is the primary SDK target. |
 | Cloud Functions | Medium | L | Execute Python / Node.js function handlers locally in response to HTTP or Pub/Sub triggers. Needs a function registry, a trigger wiring layer, and a sandboxed invocation model. |
-| Vertex AI | Medium | XL | Broad surface (predictions, fine-tuning, Vector Search, Feature Store). A useful first milestone is a stub prediction endpoint that returns configurable mock responses, enabling apps to run without real model calls. |
+| Vertex AI | Medium | XL | See detailed breakdown below. |
 | Cloud Endpoints / API Gateway | Low | M | Request validation and routing proxy. Useful for teams building APIs on top of Cloudbox-backed services. |
+
+### Vertex AI — detailed plan
+
+Vertex AI is several distinct sub-products. Each phase is independently shippable.
+
+**Backend strategy:** the emulator supports two selectable backends via `CLOUDBOX_VERTEX_BACKEND`:
+
+- `mock` (default) — return static configurable responses; no external dependency.
+- `ollama` — proxy requests to a local [Ollama](https://ollama.com) instance, providing real LLM inference without GCP credentials or billing. Since Ollama, LM Studio, llama.cpp server, and vLLM all expose an OpenAI-compatible API, the proxy is implemented as a generic `OpenAICompatibleBackend`.
+
+Model name mapping is configurable because local model names differ from GCP model names:
+
+```
+CLOUDBOX_OLLAMA_HOST=localhost:11434
+CLOUDBOX_VERTEX_MODEL_MAP=gemini-2.0-flash:llama3.2,text-embedding-004:nomic-embed-text
+```
+
+If Ollama is not reachable, the emulator falls back to mock mode with a warning.
+
+**Phase 1 — Generative AI stub (port 9060) · Effort: M**
+
+| Endpoint | Notes |
+|---|---|
+| `POST .../publishers/google/models/{model}:generateContent` | Map `contents[].parts[].text` → Ollama `messages[].content`; translate response back to `candidates[]` shape. |
+| `POST .../publishers/google/models/{model}:streamGenerateContent` | Re-encode Ollama's newline-delimited chunks into Vertex's streaming schema. |
+| `POST .../publishers/google/models/{model}:embedContent` | Ollama `/api/embed` → `{"embedding": {"values": [...]}}`. Works with `nomic-embed-text`, `mxbai-embed-large`. |
+| `POST .../publishers/google/models/{model}:countTokens` | Mock mode: configurable count. Ollama mode: approximate with character-based heuristic (Ollama has no tokenizer endpoint). |
+
+Ollama coverage: text generation ✅ · streaming ✅ · multi-turn ✅ · system instructions ✅ · temperature/topP/maxTokens ✅ · safety ratings ❌ (always return empty) · `finishReason: SAFETY` ❌ (always `STOP`).
+
+**Phase 2 — Online prediction endpoints · Effort: M**
+
+| Endpoint | Notes |
+|---|---|
+| `POST/GET/LIST/DELETE .../endpoints` | Standard NamespacedStore CRUD. Introduces the shared **Long-Running Operation (LRO)** pattern: create/deploy operations return `{ name: ".../operations/{id}", done: true }` immediately. A single `GET .../operations/{id}` route covers all services. |
+| `POST .../endpoints/{endpoint}:deployModel` / `:undeployModel` | Update traffic split in store; return LRO. |
+| `POST .../endpoints/{endpoint}:predict` | Return configurable mock; in Ollama mode, proxy to the model mapped to this endpoint. |
+| `POST .../endpoints/{endpoint}:rawPredict` / `:streamRawPredict` | Pass request body through to Ollama as-is; return response body unchanged. |
+| `POST/GET/LIST/DELETE .../models` | Model Registry CRUD via NamespacedStore. |
+
+**Phase 3 — Vector Search · Effort: L**
+
+| Endpoint | Notes |
+|---|---|
+| `POST/GET/LIST/DELETE .../indexes` | Index CRUD; store dimension count, distance metric, and datapoints in NamespacedStore. |
+| `POST .../indexes/{index}:upsertDatapoints` | Store `{datapointId → featureVector}` entries. |
+| `POST .../indexes/{index}:removeDatapoints` | Delete by ID. |
+| `POST/GET/LIST/DELETE .../indexEndpoints` | Index endpoint CRUD + deployIndex/undeployIndex via LRO. |
+| `POST .../indexEndpoints/{ep}:findNeighbors` | Brute-force similarity search over stored vectors. Support cosine, dot-product, and L2 distance. Apply `restricts` / `numericRestricts` filters before ranking. Fast enough for local test datasets (thousands of vectors). |
+
+**Phase 4 — Everything else · Effort: XL · Low priority**
+
+Training pipelines, AutoML, Feature Store, Model Monitoring, Workbench — these involve long-running distributed compute and GCS-backed artifacts. Not practically emulatable; stub endpoints that accept calls and return plausible-looking responses are the ceiling here.
 | Artifact Registry | Low | M | Basic OCI image push/pull (registry API). Enables local container build pipelines without a real registry. |
 
 ---
