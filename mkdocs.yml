@@ -1,0 +1,61 @@
+site_name: Cloudbox
+site_url: https://omab.github.io/cloudbox/reference/
+site_description: >-
+  Local emulator for Google Cloud Platform services — Cloud Storage, Pub/Sub,
+  Firestore, Secret Manager, Cloud Tasks, BigQuery, Cloud Spanner, Cloud Logging,
+  Cloud Scheduler, and Cloud KMS.
+site_author: Matías Aguirre
+repo_url: https://github.com/omab/cloudbox
+repo_name: omab/cloudbox
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: _site/reference
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue
+    accent: blue
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+nav:
+  - Overview: index.md
+  - Service Reference:
+    - Cloud Storage: services/gcs.md
+    - Cloud Pub/Sub: services/pubsub.md
+    - Cloud Firestore: services/firestore.md
+    - Secret Manager: services/secretmanager.md
+    - Cloud Tasks: services/tasks.md
+    - Cloud Scheduler: services/scheduler.md
+    - Cloud KMS: services/kms.md
+    - BigQuery: services/bigquery.md
+    - Cloud Spanner: services/spanner.md
+    - Cloud Logging / Monitoring: services/logging.md

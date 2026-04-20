@@ -11,17 +11,17 @@ endpoints, field tables, and known limitations.
 
 | Service | Port | Reference |
 |---|---|---|
-| Cloud Storage | 4443 | [docs/services/gcs.md](services/gcs.md) |
-| Cloud Pub/Sub (gRPC) | 8085 | [docs/services/pubsub.md](services/pubsub.md) |
-| Cloud Pub/Sub (REST) | 8086 | [docs/services/pubsub.md](services/pubsub.md) |
-| Cloud Firestore | 8080 | [docs/services/firestore.md](services/firestore.md) |
-| Secret Manager | 8090 | [docs/services/secretmanager.md](services/secretmanager.md) |
-| Cloud Tasks | 8123 | [docs/services/tasks.md](services/tasks.md) |
-| Cloud Scheduler | 8091 | [docs/services/scheduler.md](services/scheduler.md) |
-| Cloud KMS | 8092 | [docs/services/kms.md](services/kms.md) |
-| BigQuery | 9050 | [docs/services/bigquery.md](services/bigquery.md) |
-| Cloud Spanner | 9010 | [docs/services/spanner.md](services/spanner.md) |
-| Cloud Logging / Monitoring | 9020 | [docs/services/logging.md](services/logging.md) |
+| Cloud Storage | 4443 | [Cloud Storage](services/gcs.md) |
+| Cloud Pub/Sub (gRPC) | 8085 | [Cloud Pub/Sub](services/pubsub.md) |
+| Cloud Pub/Sub (REST) | 8086 | [Cloud Pub/Sub](services/pubsub.md) |
+| Cloud Firestore | 8080 | [Cloud Firestore](services/firestore.md) |
+| Secret Manager | 8090 | [Secret Manager](services/secretmanager.md) |
+| Cloud Tasks | 8123 | [Cloud Tasks](services/tasks.md) |
+| Cloud Scheduler | 8091 | [Cloud Scheduler](services/scheduler.md) |
+| Cloud KMS | 8092 | [Cloud KMS](services/kms.md) |
+| BigQuery | 9050 | [BigQuery](services/bigquery.md) |
+| Cloud Spanner | 9010 | [Cloud Spanner](services/spanner.md) |
+| Cloud Logging / Monitoring | 9020 | [Cloud Logging](services/logging.md) |
 
 ## Quick start
 
@@ -48,6 +48,6 @@ All services start concurrently. Override any port with the corresponding
 
 ## Further reading
 
-- [README](../README.md) — project overview, SDK setup, feature matrix, and architecture
-- [ROADMAP.md](../ROADMAP.md) — planned features, improvements, and effort estimates
-- [examples/](../examples/) — runnable end-to-end examples for every service
+- [GitHub repository](https://github.com/omab/cloudbox) — source code, issue tracker, and contributions
+- [ROADMAP](https://github.com/omab/cloudbox/blob/main/ROADMAP.md) — planned features and effort estimates
+- [Examples](https://github.com/omab/cloudbox/tree/main/examples) — runnable end-to-end scripts for every service

@@ -212,3 +212,4 @@ __marimo__/
 !.claude/commands/
 !.claude/commands/*.md
 .*.sw*
+_site/
