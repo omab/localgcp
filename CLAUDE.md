@@ -97,6 +97,7 @@ When adding a new service:
 3. Add a port setting to `cloudbox/config.py` and `docker-compose.yml`.
 4. Add a test file under `tests/`.
 5. Add an admin UI tab in `cloudbox/admin/app.py` (stats, panel HTML, JS loader, API endpoints, reset wiring).
+6. Create `docs/services/{name}.md` — see the **Service documentation** section below.
 
 ## Key environment variables
 
@@ -222,6 +223,55 @@ Rules:
 - Each `Args` entry: `name: Description.` (no type — it's already in the signature).
 - `Returns:` describes the return value; omit for `-> None` functions.
 - `Raises:` lists only exceptions the function itself raises intentionally.
+
+## Service documentation
+
+Every service has a reference document at `docs/services/{name}.md`. Keep these in sync
+whenever you add or change service behaviour.
+
+### When to update docs
+
+- **Adding a new service** — create `docs/services/{name}.md` as step 6 of the service
+  checklist above.
+- **Adding an endpoint** — add it to the relevant section in the service doc. Include the
+  HTTP method + path, the request body shape, and the response shape.
+- **Changing behaviour** — update the description, error codes, or field tables that are
+  affected. Pay particular attention to the **Known limitations** section: remove an entry
+  when a limitation is fixed, add one when you intentionally leave something unimplemented.
+- **Changing a port or env var** — update the **Connection** section and the port/env var
+  table in the doc.
+
+### Document structure
+
+Each service doc follows this layout (omit sections that don't apply):
+
+```
+# {Service Name}
+
+One-sentence description + SDK compatibility note.
+
+## Connection
+Port, env var override, SDK client setup snippet.
+
+## {Resource type(s)}
+CRUD endpoints: method + path, minimal request/response JSON, error codes.
+
+## {Operation groups}
+Non-CRUD operations grouped by purpose.
+
+## {Resource} fields
+Table of field name / type / description for the primary resource.
+
+## Known limitations
+Table of unimplemented features with a short reason or workaround.
+
+## Examples
+Commands to run the examples under examples/{name}/.
+```
+
+The docs live in `docs/services/` and are linked from `README.md`. Do not add prose that
+duplicates what the code already expresses — focus on the _contract_ (inputs, outputs,
+error codes) and _limitations_ (what the emulator does not do that production does).
 
 ## Committing changes
 
