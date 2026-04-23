@@ -1,6 +1,9 @@
 """Tests for Cloud Scheduler emulator."""
+
+from datetime import UTC
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 PROJECT = "local-project"
 LOCATION = "us-central1"
@@ -34,10 +37,13 @@ def test_create_and_get_job(scheduler_client):
 
 def test_list_jobs(scheduler_client):
     for i in range(3):
-        scheduler_client.post(BASE, json={
-            **JOB_BODY,
-            "name": f"projects/{PROJECT}/locations/{LOCATION}/jobs/job-{i}",
-        })
+        scheduler_client.post(
+            BASE,
+            json={
+                **JOB_BODY,
+                "name": f"projects/{PROJECT}/locations/{LOCATION}/jobs/job-{i}",
+            },
+        )
     r = scheduler_client.get(BASE)
     assert r.status_code == 200
     assert len(r.json()["jobs"]) == 3
@@ -59,7 +65,9 @@ def test_delete_job(scheduler_client):
 
 def test_update_job(scheduler_client):
     scheduler_client.post(BASE, json=JOB_BODY)
-    r = scheduler_client.patch(f"{BASE}/my-job", json={"schedule": "0 * * * *", "description": "hourly"})
+    r = scheduler_client.patch(
+        f"{BASE}/my-job", json={"schedule": "0 * * * *", "description": "hourly"}
+    )
     assert r.status_code == 200
     assert r.json()["schedule"] == "0 * * * *"
     assert r.json()["description"] == "hourly"
@@ -119,28 +127,34 @@ def test_run_job_records_error_on_failure(scheduler_client):
 
 
 def test_worker_is_due_never_run():
+    from datetime import datetime
+
     from cloudbox.services.scheduler.worker import _is_due
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     # Job that has never run is always due
     assert _is_due("* * * * *", "", now) is True
 
 
 def test_worker_is_due_after_interval():
+    from datetime import datetime, timedelta
+
     from cloudbox.services.scheduler.worker import _is_due
-    from datetime import datetime, timezone, timedelta
+
     # Last run 2 minutes ago, schedule is every minute → due
-    last = (datetime.now(timezone.utc) - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    now = datetime.now(timezone.utc)
+    last = (datetime.now(UTC) - timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC)
     assert _is_due("* * * * *", last, now) is True
 
 
 def test_worker_not_due_just_ran():
+    from datetime import datetime, timedelta
+
     from cloudbox.services.scheduler.worker import _is_due
-    from datetime import datetime, timezone, timedelta
+
     # Last run 5 seconds ago, schedule is every hour → not due
-    last = (datetime.now(timezone.utc) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    now = datetime.now(timezone.utc)
+    last = (datetime.now(UTC) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC)
     assert _is_due("0 * * * *", last, now) is False
 
 
@@ -151,6 +165,7 @@ def test_worker_not_due_just_ran():
 
 def test_parse_duration_s():
     from cloudbox.services.scheduler.worker import _parse_duration_s
+
     assert _parse_duration_s("0s") == 0.0
     assert _parse_duration_s("5s") == 5.0
     assert _parse_duration_s("30m") == 1800.0
@@ -160,27 +175,36 @@ def test_parse_duration_s():
 
 def test_retry_backoff():
     from cloudbox.services.scheduler.worker import _retry_backoff
+
     cfg = {"minBackoffDuration": "5s", "maxBackoffDuration": "300s", "maxDoublings": 3}
-    assert _retry_backoff(cfg, 1) == pytest.approx(5.0)    # 5 * 2^0
-    assert _retry_backoff(cfg, 2) == pytest.approx(10.0)   # 5 * 2^1
-    assert _retry_backoff(cfg, 3) == pytest.approx(20.0)   # 5 * 2^2
-    assert _retry_backoff(cfg, 4) == pytest.approx(40.0)   # 5 * 2^3 (capped at maxDoublings)
-    assert _retry_backoff(cfg, 5) == pytest.approx(40.0)   # still capped at maxDoublings
+    assert _retry_backoff(cfg, 1) == pytest.approx(5.0)  # 5 * 2^0
+    assert _retry_backoff(cfg, 2) == pytest.approx(10.0)  # 5 * 2^1
+    assert _retry_backoff(cfg, 3) == pytest.approx(20.0)  # 5 * 2^2
+    assert _retry_backoff(cfg, 4) == pytest.approx(40.0)  # 5 * 2^3 (capped at maxDoublings)
+    assert _retry_backoff(cfg, 5) == pytest.approx(40.0)  # still capped at maxDoublings
 
 
 def test_retry_backoff_capped_at_max():
     from cloudbox.services.scheduler.worker import _retry_backoff
+
     cfg = {"minBackoffDuration": "60s", "maxBackoffDuration": "100s", "maxDoublings": 10}
     assert _retry_backoff(cfg, 3) == pytest.approx(100.0)  # 60*4=240 capped to 100
 
 
 def test_schedule_retry_sets_state():
+    from datetime import datetime
+
     from cloudbox.services.scheduler.worker import _schedule_retry
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     job = {
         "name": "projects/p/locations/l/jobs/j",
-        "retryConfig": {"retryCount": 3, "minBackoffDuration": "1s", "maxBackoffDuration": "60s", "maxDoublings": 5},
+        "retryConfig": {
+            "retryCount": 3,
+            "minBackoffDuration": "1s",
+            "maxBackoffDuration": "60s",
+            "maxDoublings": 5,
+        },
         "_retryStartTime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     _schedule_retry(job, 0, now)
@@ -189,9 +213,11 @@ def test_schedule_retry_sets_state():
 
 
 def test_schedule_retry_exhausted():
-    from cloudbox.services.scheduler.worker import _schedule_retry, _clear_retry_state
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+
+    from cloudbox.services.scheduler.worker import _schedule_retry
+
+    now = datetime.now(UTC)
     job = {
         "name": "projects/p/locations/l/jobs/j",
         "retryConfig": {"retryCount": 2},
@@ -203,9 +229,11 @@ def test_schedule_retry_exhausted():
 
 
 def test_schedule_retry_max_duration_exceeded():
+    from datetime import datetime, timedelta
+
     from cloudbox.services.scheduler.worker import _schedule_retry
-    from datetime import datetime, timezone, timedelta
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     start = now - timedelta(seconds=120)  # started 2 minutes ago
     job = {
         "name": "projects/p/locations/l/jobs/j",
@@ -217,9 +245,11 @@ def test_schedule_retry_max_duration_exceeded():
 
 
 def test_schedule_retry_no_retry_count():
+    from datetime import datetime
+
     from cloudbox.services.scheduler.worker import _schedule_retry
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+
+    now = datetime.now(UTC)
     job = {
         "name": "projects/p/locations/l/jobs/j",
         "retryConfig": {"retryCount": 0},
@@ -230,19 +260,22 @@ def test_schedule_retry_no_retry_count():
 
 def test_update_job_retry_config(scheduler_client):
     """Verify retryConfig is stored and returned by the API."""
-    scheduler_client.post(BASE, json={
-        "name": f"{BASE.replace('/jobs', '')}/jobs/retry-job",
-        "schedule": "* * * * *",
-        "timeZone": "UTC",
-        "httpTarget": {"uri": "http://localhost:9999/noop"},
-        "retryConfig": {
-            "retryCount": 5,
-            "minBackoffDuration": "2s",
-            "maxBackoffDuration": "120s",
-            "maxDoublings": 4,
-            "maxRetryDuration": "10m",
+    scheduler_client.post(
+        BASE,
+        json={
+            "name": f"{BASE.replace('/jobs', '')}/jobs/retry-job",
+            "schedule": "* * * * *",
+            "timeZone": "UTC",
+            "httpTarget": {"uri": "http://localhost:9999/noop"},
+            "retryConfig": {
+                "retryCount": 5,
+                "minBackoffDuration": "2s",
+                "maxBackoffDuration": "120s",
+                "maxDoublings": 4,
+                "maxRetryDuration": "10m",
+            },
         },
-    })
+    )
     r = scheduler_client.get(f"{BASE}/retry-job")
     assert r.status_code == 200
     rc = r.json()["retryConfig"]
@@ -251,3 +284,43 @@ def test_update_job_retry_config(scheduler_client):
     assert rc["maxBackoffDuration"] == "120s"
     assert rc["maxDoublings"] == 4
     assert rc["maxRetryDuration"] == "10m"
+
+
+# ---------------------------------------------------------------------------
+# Missing-resource 404 / 400 paths
+# ---------------------------------------------------------------------------
+
+
+def test_create_job_without_name_returns_400(scheduler_client):
+    r = scheduler_client.post(BASE, json={"schedule": "* * * * *", "timeZone": "UTC"})
+    assert r.status_code == 400
+
+
+def test_get_missing_job_returns_404(scheduler_client):
+    r = scheduler_client.get(f"{BASE}/no-such-job")
+    assert r.status_code == 404
+
+
+def test_update_missing_job_returns_404(scheduler_client):
+    r = scheduler_client.patch(f"{BASE}/no-such-job", json={"description": "x"})
+    assert r.status_code == 404
+
+
+def test_delete_missing_job_returns_404(scheduler_client):
+    r = scheduler_client.delete(f"{BASE}/no-such-job")
+    assert r.status_code == 404
+
+
+def test_run_missing_job_returns_404(scheduler_client):
+    r = scheduler_client.post(f"{BASE}/no-such-job:run")
+    assert r.status_code == 404
+
+
+def test_pause_missing_job_returns_404(scheduler_client):
+    r = scheduler_client.post(f"{BASE}/no-such-job:pause")
+    assert r.status_code == 404
+
+
+def test_resume_missing_job_returns_404(scheduler_client):
+    r = scheduler_client.post(f"{BASE}/no-such-job:resume")
+    assert r.status_code == 404

@@ -1,4 +1,7 @@
 """Tests for Cloud Tasks emulator."""
+
+from datetime import UTC
+
 import pytest
 
 PROJECT = "local-project"
@@ -143,6 +146,7 @@ def test_get_task(tasks_client):
 
 def test_task_with_headers_and_body(tasks_client):
     import base64
+
     tasks_client.post(
         f"{BASE}/queues",
         json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/hdr-q"},
@@ -206,27 +210,31 @@ def test_create_task_on_missing_queue_returns_404(tasks_client):
 
 def test_force_run_task(tasks_client):
     """tasks/{id}:run resets scheduleTime so the worker dispatches it immediately."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta
+
     tasks_client.post(
         f"{BASE}/queues",
         json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/run-q"},
     )
-    future = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    future = (datetime.now(UTC) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     r = tasks_client.post(
         f"{BASE}/queues/run-q/tasks",
-        json={"task": {
-            "httpRequest": {"url": "http://example.com"},
-            "scheduleTime": future,
-        }},
+        json={
+            "task": {
+                "httpRequest": {"url": "http://example.com"},
+                "scheduleTime": future,
+            }
+        },
     )
     task_id = r.json()["name"].split("/tasks/")[1]
 
     r2 = tasks_client.post(f"{BASE}/queues/run-q/tasks/{task_id}:run")
     assert r2.status_code == 200
     # scheduleTime should have been reset to approximately now (not the future)
-    from datetime import datetime, timezone
-    sched = datetime.fromisoformat(r2.json()["scheduleTime"].rstrip("Z")).replace(tzinfo=timezone.utc)
-    assert sched <= datetime.now(timezone.utc) + timedelta(seconds=5)
+    from datetime import datetime
+
+    sched = datetime.fromisoformat(r2.json()["scheduleTime"].rstrip("Z")).replace(tzinfo=UTC)
+    assert sched <= datetime.now(UTC) + timedelta(seconds=5)
 
 
 def test_update_missing_queue_returns_404(tasks_client):
@@ -327,14 +335,17 @@ def test_retry_delay_defaults():
 
 
 def test_rate_limits_stored_and_returned(tasks_client):
-    """rateLimits set on create are stored and returned on GET."""
-    r = tasks_client.post(f"{BASE}/queues", json={
-        "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/rl-queue",
-        "rateLimits": {
-            "maxDispatchesPerSecond": 5.0,
-            "maxConcurrentDispatches": 2,
+    """RateLimits set on create are stored and returned on GET."""
+    r = tasks_client.post(
+        f"{BASE}/queues",
+        json={
+            "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/rl-queue",
+            "rateLimits": {
+                "maxDispatchesPerSecond": 5.0,
+                "maxConcurrentDispatches": 2,
+            },
         },
-    })
+    )
     assert r.status_code == 200
     rl = r.json()["rateLimits"]
     assert rl["maxDispatchesPerSecond"] == pytest.approx(5.0)
@@ -343,15 +354,21 @@ def test_rate_limits_stored_and_returned(tasks_client):
 
 def test_rate_limits_updated_via_patch(tasks_client):
     """PATCH can change rateLimits on an existing queue."""
-    tasks_client.post(f"{BASE}/queues", json={
-        "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/rl-patch-queue",
-    })
-    r = tasks_client.patch(f"{BASE}/queues/rl-patch-queue", json={
-        "rateLimits": {
-            "maxDispatchesPerSecond": 10.0,
-            "maxConcurrentDispatches": 3,
+    tasks_client.post(
+        f"{BASE}/queues",
+        json={
+            "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/rl-patch-queue",
         },
-    })
+    )
+    r = tasks_client.patch(
+        f"{BASE}/queues/rl-patch-queue",
+        json={
+            "rateLimits": {
+                "maxDispatchesPerSecond": 10.0,
+                "maxConcurrentDispatches": 3,
+            },
+        },
+    )
     assert r.status_code == 200
     rl = r.json()["rateLimits"]
     assert rl["maxDispatchesPerSecond"] == pytest.approx(10.0)
@@ -361,31 +378,39 @@ def test_rate_limits_updated_via_patch(tasks_client):
 def test_max_dispatches_per_second_caps_tick():
     """_tick dispatches at most maxDispatchesPerSecond tasks per second."""
     import asyncio
-    from datetime import datetime, timedelta, timezone
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from datetime import datetime, timedelta
+    from unittest.mock import MagicMock, patch
 
-    from cloudbox.services.tasks.worker import _tick
     from cloudbox.services.tasks.store import get_store
+    from cloudbox.services.tasks.worker import _tick
 
     store = get_store()
     store.reset()
 
     queue_name = "projects/p/locations/l/queues/rate-q"
-    store.set("queues", queue_name, {
-        "name": queue_name,
-        "state": "RUNNING",
-        "rateLimits": {"maxDispatchesPerSecond": 2.0, "maxConcurrentDispatches": 10},
-        "retryConfig": {"maxAttempts": 1},
-    })
+    store.set(
+        "queues",
+        queue_name,
+        {
+            "name": queue_name,
+            "state": "RUNNING",
+            "rateLimits": {"maxDispatchesPerSecond": 2.0, "maxConcurrentDispatches": 10},
+            "retryConfig": {"maxAttempts": 1},
+        },
+    )
 
-    past = (datetime.now(timezone.utc) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    past = (datetime.now(UTC) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     for i in range(5):
         task_key = f"{queue_name}/tasks/t{i}"
-        store.set("tasks", task_key, {
-            "name": task_key,
-            "scheduleTime": past,
-            "httpRequest": {"url": "http://localhost:9999/noop", "httpMethod": "POST"},
-        })
+        store.set(
+            "tasks",
+            task_key,
+            {
+                "name": task_key,
+                "scheduleTime": past,
+                "httpRequest": {"url": "http://localhost:9999/noop", "httpMethod": "POST"},
+            },
+        )
 
     dispatch_calls = []
 
@@ -402,31 +427,39 @@ def test_max_dispatches_per_second_caps_tick():
 def test_max_concurrent_dispatches_limits_inflight():
     """maxConcurrentDispatches=1 serialises dispatches via the semaphore."""
     import asyncio
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     from unittest.mock import MagicMock, patch
 
-    from cloudbox.services.tasks.worker import _tick, _get_semaphore
     from cloudbox.services.tasks.store import get_store
+    from cloudbox.services.tasks.worker import _get_semaphore, _tick
 
     store = get_store()
     store.reset()
 
     queue_name = "projects/p/locations/l/queues/conc-q"
-    store.set("queues", queue_name, {
-        "name": queue_name,
-        "state": "RUNNING",
-        "rateLimits": {"maxDispatchesPerSecond": 100.0, "maxConcurrentDispatches": 1},
-        "retryConfig": {"maxAttempts": 1},
-    })
+    store.set(
+        "queues",
+        queue_name,
+        {
+            "name": queue_name,
+            "state": "RUNNING",
+            "rateLimits": {"maxDispatchesPerSecond": 100.0, "maxConcurrentDispatches": 1},
+            "retryConfig": {"maxAttempts": 1},
+        },
+    )
 
-    past = (datetime.now(timezone.utc) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    past = (datetime.now(UTC) - timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     for i in range(3):
         task_key = f"{queue_name}/tasks/c{i}"
-        store.set("tasks", task_key, {
-            "name": task_key,
-            "scheduleTime": past,
-            "httpRequest": {"url": "http://localhost:9999/noop", "httpMethod": "POST"},
-        })
+        store.set(
+            "tasks",
+            task_key,
+            {
+                "name": task_key,
+                "scheduleTime": past,
+                "httpRequest": {"url": "http://localhost:9999/noop", "httpMethod": "POST"},
+            },
+        )
 
     # Force semaphore recreation with limit=1
     _get_semaphore(queue_name, 1)
@@ -445,3 +478,17 @@ def test_max_concurrent_dispatches_limits_inflight():
         asyncio.run(_tick(MagicMock()))
 
     assert max_inflight[0] <= 1
+
+
+def test_get_missing_queue_returns_404(tasks_client):
+    r = tasks_client.get(f"{BASE}/queues/no-such-queue")
+    assert r.status_code == 404
+
+
+def test_run_missing_task_returns_404(tasks_client):
+    tasks_client.post(
+        f"{BASE}/queues",
+        json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/run-q2"},
+    )
+    r = tasks_client.post(f"{BASE}/queues/run-q2/tasks/nonexistent-task:run")
+    assert r.status_code == 404

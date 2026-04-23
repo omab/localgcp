@@ -146,11 +146,25 @@ def test_list_filter_by_timestamp(logging_client):
     # Write an entry with a known timestamp
     _write(
         logging_client,
-        [{"logName": LOG_NAME, "severity": "INFO", "textPayload": "old", "timestamp": "2020-01-01T00:00:00Z"}],
+        [
+            {
+                "logName": LOG_NAME,
+                "severity": "INFO",
+                "textPayload": "old",
+                "timestamp": "2020-01-01T00:00:00Z",
+            }
+        ],
     )
     _write(
         logging_client,
-        [{"logName": LOG_NAME, "severity": "INFO", "textPayload": "new", "timestamp": "2025-01-01T00:00:00Z"}],
+        [
+            {
+                "logName": LOG_NAME,
+                "severity": "INFO",
+                "textPayload": "new",
+                "timestamp": "2025-01-01T00:00:00Z",
+            }
+        ],
     )
 
     r = _list(logging_client, filter_str='timestamp>="2024-01-01T00:00:00Z"')
@@ -405,8 +419,8 @@ def test_auto_timestamp_and_insert_id(logging_client):
     entries = r2.json()["entries"]
     assert len(entries) == 1
     e = entries[0]
-    assert e.get("timestamp")     # auto-set
-    assert e.get("insertId")      # auto-set
+    assert e.get("timestamp")  # auto-set
+    assert e.get("insertId")  # auto-set
 
 
 def test_explicit_insert_id_preserved(logging_client):
@@ -435,23 +449,29 @@ def test_write_entry_without_log_name_is_skipped(logging_client):
 
 
 def test_filter_severity_lte(logging_client):
-    """severity <= DEBUG matches DEBUG but not INFO."""
-    _write(logging_client, [
-        {"logName": LOG_NAME, "severity": "DEBUG", "textPayload": "dbg"},
-        {"logName": LOG_NAME, "severity": "INFO", "textPayload": "inf"},
-    ])
+    """Severity <= DEBUG matches DEBUG but not INFO."""
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "severity": "DEBUG", "textPayload": "dbg"},
+            {"logName": LOG_NAME, "severity": "INFO", "textPayload": "inf"},
+        ],
+    )
     r = _list(logging_client, filter_str='severity <= "DEBUG"')
     entries = r.json()["entries"]
     assert all(e["severity"] == "DEBUG" for e in entries)
 
 
 def test_filter_severity_gt(logging_client):
-    """severity > INFO matches WARNING and above."""
-    _write(logging_client, [
-        {"logName": LOG_NAME, "severity": "INFO", "textPayload": "inf"},
-        {"logName": LOG_NAME, "severity": "WARNING", "textPayload": "warn"},
-        {"logName": LOG_NAME, "severity": "ERROR", "textPayload": "err"},
-    ])
+    """Severity > INFO matches WARNING and above."""
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "severity": "INFO", "textPayload": "inf"},
+            {"logName": LOG_NAME, "severity": "WARNING", "textPayload": "warn"},
+            {"logName": LOG_NAME, "severity": "ERROR", "textPayload": "err"},
+        ],
+    )
     r = _list(logging_client, filter_str='severity > "INFO"')
     entries = r.json()["entries"]
     assert len(entries) == 2
@@ -459,12 +479,15 @@ def test_filter_severity_gt(logging_client):
 
 
 def test_filter_severity_lt(logging_client):
-    """severity < WARNING matches INFO and below."""
-    _write(logging_client, [
-        {"logName": LOG_NAME, "severity": "DEBUG", "textPayload": "d"},
-        {"logName": LOG_NAME, "severity": "INFO", "textPayload": "i"},
-        {"logName": LOG_NAME, "severity": "WARNING", "textPayload": "w"},
-    ])
+    """Severity < WARNING matches INFO and below."""
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "severity": "DEBUG", "textPayload": "d"},
+            {"logName": LOG_NAME, "severity": "INFO", "textPayload": "i"},
+            {"logName": LOG_NAME, "severity": "WARNING", "textPayload": "w"},
+        ],
+    )
     r = _list(logging_client, filter_str='severity < "WARNING"')
     entries = r.json()["entries"]
     assert len(entries) == 2
@@ -472,11 +495,14 @@ def test_filter_severity_lt(logging_client):
 
 
 def test_filter_severity_eq(logging_client):
-    """severity = INFO matches exactly INFO."""
-    _write(logging_client, [
-        {"logName": LOG_NAME, "severity": "INFO", "textPayload": "i"},
-        {"logName": LOG_NAME, "severity": "WARNING", "textPayload": "w"},
-    ])
+    """Severity = INFO matches exactly INFO."""
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "severity": "INFO", "textPayload": "i"},
+            {"logName": LOG_NAME, "severity": "WARNING", "textPayload": "w"},
+        ],
+    )
     r = _list(logging_client, filter_str='severity = "INFO"')
     entries = r.json()["entries"]
     assert len(entries) == 1
@@ -484,12 +510,15 @@ def test_filter_severity_eq(logging_client):
 
 
 def test_filter_timestamp_lte(logging_client):
-    """timestamp <= filter."""
+    """Timestamp <= filter."""
     ts = "2025-06-01T00:00:00Z"
-    _write(logging_client, [
-        {"logName": LOG_NAME, "timestamp": "2025-05-01T00:00:00Z", "textPayload": "before"},
-        {"logName": LOG_NAME, "timestamp": "2025-07-01T00:00:00Z", "textPayload": "after"},
-    ])
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "timestamp": "2025-05-01T00:00:00Z", "textPayload": "before"},
+            {"logName": LOG_NAME, "timestamp": "2025-07-01T00:00:00Z", "textPayload": "after"},
+        ],
+    )
     r = _list(logging_client, filter_str=f'timestamp <= "{ts}"')
     entries = r.json()["entries"]
     assert len(entries) == 1
@@ -497,12 +526,15 @@ def test_filter_timestamp_lte(logging_client):
 
 
 def test_filter_timestamp_gt(logging_client):
-    """timestamp > filter."""
+    """Timestamp > filter."""
     ts = "2025-06-01T00:00:00Z"
-    _write(logging_client, [
-        {"logName": LOG_NAME, "timestamp": "2025-05-01T00:00:00Z", "textPayload": "before"},
-        {"logName": LOG_NAME, "timestamp": "2025-07-01T00:00:00Z", "textPayload": "after"},
-    ])
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "timestamp": "2025-05-01T00:00:00Z", "textPayload": "before"},
+            {"logName": LOG_NAME, "timestamp": "2025-07-01T00:00:00Z", "textPayload": "after"},
+        ],
+    )
     r = _list(logging_client, filter_str=f'timestamp > "{ts}"')
     entries = r.json()["entries"]
     assert len(entries) == 1
@@ -510,12 +542,15 @@ def test_filter_timestamp_gt(logging_client):
 
 
 def test_filter_timestamp_lt(logging_client):
-    """timestamp < filter."""
+    """Timestamp < filter."""
     ts = "2025-07-01T00:00:00Z"
-    _write(logging_client, [
-        {"logName": LOG_NAME, "timestamp": "2025-05-01T00:00:00Z", "textPayload": "old"},
-        {"logName": LOG_NAME, "timestamp": "2025-07-01T00:00:00Z", "textPayload": "exact"},
-    ])
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "timestamp": "2025-05-01T00:00:00Z", "textPayload": "old"},
+            {"logName": LOG_NAME, "timestamp": "2025-07-01T00:00:00Z", "textPayload": "exact"},
+        ],
+    )
     r = _list(logging_client, filter_str=f'timestamp < "{ts}"')
     entries = r.json()["entries"]
     assert len(entries) == 1
@@ -524,10 +559,13 @@ def test_filter_timestamp_lt(logging_client):
 
 def test_filter_resource_type(logging_client):
     """resource.type = filter."""
-    _write(logging_client, [
-        {"logName": LOG_NAME, "resource": {"type": "gce_instance"}, "textPayload": "vm"},
-        {"logName": LOG_NAME, "resource": {"type": "gcs_bucket"}, "textPayload": "bucket"},
-    ])
+    _write(
+        logging_client,
+        [
+            {"logName": LOG_NAME, "resource": {"type": "gce_instance"}, "textPayload": "vm"},
+            {"logName": LOG_NAME, "resource": {"type": "gcs_bucket"}, "textPayload": "bucket"},
+        ],
+    )
     r = _list(logging_client, filter_str='resource.type = "gce_instance"')
     entries = r.json()["entries"]
     assert len(entries) == 1
@@ -568,7 +606,7 @@ def test_delete_missing_sink_returns_404(logging_client):
 def test_create_metric_empty_name_returns_400(logging_client):
     r = logging_client.post(
         f"/v2/projects/{PROJECT}/metrics",
-        json={"filter": 'severity >= ERROR'},
+        json={"filter": "severity >= ERROR"},
     )
     assert r.status_code == 400
 
@@ -576,7 +614,7 @@ def test_create_metric_empty_name_returns_400(logging_client):
 def test_update_missing_metric_returns_404(logging_client):
     r = logging_client.patch(
         f"/v2/projects/{PROJECT}/metrics/no-such-metric",
-        json={"filter": 'severity >= WARNING'},
+        json={"filter": "severity >= WARNING"},
     )
     assert r.status_code == 404
 
@@ -596,11 +634,18 @@ def test_query_time_series(logging_client):
     logging_client.post(
         f"/v3/projects/{PROJECT}/timeSeries",
         json={
-            "timeSeries": [{
-                "metric": {"type": "custom.googleapis.com/requests", "labels": {}},
-                "resource": {"type": "global", "labels": {}},
-                "points": [{"interval": {"endTime": "2025-01-01T00:00:00Z"}, "value": {"int64Value": "1"}}],
-            }]
+            "timeSeries": [
+                {
+                    "metric": {"type": "custom.googleapis.com/requests", "labels": {}},
+                    "resource": {"type": "global", "labels": {}},
+                    "points": [
+                        {
+                            "interval": {"endTime": "2025-01-01T00:00:00Z"},
+                            "value": {"int64Value": "1"},
+                        }
+                    ],
+                }
+            ]
         },
     )
     r = logging_client.post(
@@ -619,11 +664,14 @@ def test_query_time_series(logging_client):
 
 
 def test_create_and_get_exclusion(logging_client):
-    r = logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-        "name": "excl-1",
-        "filter": 'severity >= "ERROR"',
-        "description": "Drop errors",
-    })
+    r = logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions",
+        json={
+            "name": "excl-1",
+            "filter": 'severity >= "ERROR"',
+            "description": "Drop errors",
+        },
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["name"] == "excl-1"
@@ -636,10 +684,13 @@ def test_create_and_get_exclusion(logging_client):
 
 def test_list_exclusions(logging_client):
     for i in range(3):
-        logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-            "name": f"list-excl-{i}",
-            "filter": f'logName = "projects/{PROJECT}/logs/log-{i}"',
-        })
+        logging_client.post(
+            f"/v2/projects/{PROJECT}/exclusions",
+            json={
+                "name": f"list-excl-{i}",
+                "filter": f'logName = "projects/{PROJECT}/logs/log-{i}"',
+            },
+        )
     r = logging_client.get(f"/v2/projects/{PROJECT}/exclusions")
     assert r.status_code == 200
     names = {e["name"] for e in r.json()["exclusions"]}
@@ -647,27 +698,39 @@ def test_list_exclusions(logging_client):
 
 
 def test_duplicate_exclusion_returns_409(logging_client):
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"name": "dup-excl", "filter": ""})
-    r = logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"name": "dup-excl", "filter": ""})
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions", json={"name": "dup-excl", "filter": ""}
+    )
+    r = logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions", json={"name": "dup-excl", "filter": ""}
+    )
     assert r.status_code == 409
 
 
 def test_update_exclusion(logging_client):
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-        "name": "upd-excl",
-        "filter": 'severity = "DEBUG"',
-    })
-    r = logging_client.patch(f"/v2/projects/{PROJECT}/exclusions/upd-excl", json={
-        "filter": 'severity = "INFO"',
-        "disabled": True,
-    })
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions",
+        json={
+            "name": "upd-excl",
+            "filter": 'severity = "DEBUG"',
+        },
+    )
+    r = logging_client.patch(
+        f"/v2/projects/{PROJECT}/exclusions/upd-excl",
+        json={
+            "filter": 'severity = "INFO"',
+            "disabled": True,
+        },
+    )
     assert r.status_code == 200
     assert r.json()["filter"] == 'severity = "INFO"'
     assert r.json()["disabled"] is True
 
 
 def test_delete_exclusion(logging_client):
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"name": "del-excl", "filter": ""})
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions", json={"name": "del-excl", "filter": ""}
+    )
     r = logging_client.delete(f"/v2/projects/{PROJECT}/exclusions/del-excl")
     assert r.status_code == 200
     r2 = logging_client.get(f"/v2/projects/{PROJECT}/exclusions/del-excl")
@@ -685,32 +748,43 @@ def test_get_missing_exclusion_returns_404(logging_client):
 
 
 def _write_entry(logging_client, log_name: str, severity: str, insert_id: str):
-    logging_client.post("/v2/entries:write", json={
-        "entries": [{
-            "logName": log_name,
-            "severity": severity,
-            "insertId": insert_id,
-            "textPayload": f"msg-{insert_id}",
-            "resource": {"type": "global", "labels": {}},
-        }]
-    })
+    logging_client.post(
+        "/v2/entries:write",
+        json={
+            "entries": [
+                {
+                    "logName": log_name,
+                    "severity": severity,
+                    "insertId": insert_id,
+                    "textPayload": f"msg-{insert_id}",
+                    "resource": {"type": "global", "labels": {}},
+                }
+            ]
+        },
+    )
 
 
 def test_exclusion_filters_matching_entries(logging_client):
     """Entries matching an active exclusion filter are not stored."""
     log_name = f"projects/{PROJECT}/logs/noise"
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-        "name": "drop-debug",
-        "filter": 'severity = "DEBUG"',
-    })
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions",
+        json={
+            "name": "drop-debug",
+            "filter": 'severity = "DEBUG"',
+        },
+    )
 
     _write_entry(logging_client, log_name, "DEBUG", "id-debug-1")
     _write_entry(logging_client, log_name, "INFO", "id-info-1")
 
-    r = logging_client.post("/v2/entries:list", json={
-        "resourceNames": [f"projects/{PROJECT}"],
-        "filter": f'logName = "{log_name}"',
-    })
+    r = logging_client.post(
+        "/v2/entries:list",
+        json={
+            "resourceNames": [f"projects/{PROJECT}"],
+            "filter": f'logName = "{log_name}"',
+        },
+    )
     insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
     assert "id-info-1" in insert_ids
     assert "id-debug-1" not in insert_ids
@@ -719,18 +793,24 @@ def test_exclusion_filters_matching_entries(logging_client):
 def test_disabled_exclusion_does_not_filter(logging_client):
     """A disabled exclusion must not suppress entries."""
     log_name = f"projects/{PROJECT}/logs/verbose"
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-        "name": "disabled-excl",
-        "filter": 'severity = "DEBUG"',
-        "disabled": True,
-    })
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions",
+        json={
+            "name": "disabled-excl",
+            "filter": 'severity = "DEBUG"',
+            "disabled": True,
+        },
+    )
 
     _write_entry(logging_client, log_name, "DEBUG", "id-debug-kept")
 
-    r = logging_client.post("/v2/entries:list", json={
-        "resourceNames": [f"projects/{PROJECT}"],
-        "filter": f'logName = "{log_name}"',
-    })
+    r = logging_client.post(
+        "/v2/entries:list",
+        json={
+            "resourceNames": [f"projects/{PROJECT}"],
+            "filter": f'logName = "{log_name}"',
+        },
+    )
     insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
     assert "id-debug-kept" in insert_ids
 
@@ -740,17 +820,23 @@ def test_exclusion_by_log_name(logging_client):
     noisy_log = f"projects/{PROJECT}/logs/noisy-app"
     keep_log = f"projects/{PROJECT}/logs/keep-app"
 
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-        "name": "drop-noisy",
-        "filter": f'logName = "{noisy_log}"',
-    })
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions",
+        json={
+            "name": "drop-noisy",
+            "filter": f'logName = "{noisy_log}"',
+        },
+    )
 
     _write_entry(logging_client, noisy_log, "INFO", "id-noisy")
     _write_entry(logging_client, keep_log, "INFO", "id-keep")
 
-    r = logging_client.post("/v2/entries:list", json={
-        "resourceNames": [f"projects/{PROJECT}"],
-    })
+    r = logging_client.post(
+        "/v2/entries:list",
+        json={
+            "resourceNames": [f"projects/{PROJECT}"],
+        },
+    )
     insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
     assert "id-keep" in insert_ids
     assert "id-noisy" not in insert_ids
@@ -759,10 +845,13 @@ def test_exclusion_by_log_name(logging_client):
 def test_deleting_exclusion_resumes_writes(logging_client):
     """After an exclusion is deleted, matching entries are stored normally."""
     log_name = f"projects/{PROJECT}/logs/temp-excl-log"
-    logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={
-        "name": "temp-excl",
-        "filter": 'severity = "DEBUG"',
-    })
+    logging_client.post(
+        f"/v2/projects/{PROJECT}/exclusions",
+        json={
+            "name": "temp-excl",
+            "filter": 'severity = "DEBUG"',
+        },
+    )
 
     _write_entry(logging_client, log_name, "DEBUG", "id-before-delete")
 
@@ -770,10 +859,31 @@ def test_deleting_exclusion_resumes_writes(logging_client):
 
     _write_entry(logging_client, log_name, "DEBUG", "id-after-delete")
 
-    r = logging_client.post("/v2/entries:list", json={
-        "resourceNames": [f"projects/{PROJECT}"],
-        "filter": f'logName = "{log_name}"',
-    })
+    r = logging_client.post(
+        "/v2/entries:list",
+        json={
+            "resourceNames": [f"projects/{PROJECT}"],
+            "filter": f'logName = "{log_name}"',
+        },
+    )
     insert_ids = {e["insertId"] for e in r.json().get("entries", [])}
     assert "id-before-delete" not in insert_ids
     assert "id-after-delete" in insert_ids
+
+
+def test_create_exclusion_empty_name_returns_400(logging_client):
+    r = logging_client.post(f"/v2/projects/{PROJECT}/exclusions", json={"filter": ""})
+    assert r.status_code == 400
+
+
+def test_update_missing_exclusion_returns_404(logging_client):
+    r = logging_client.patch(
+        f"/v2/projects/{PROJECT}/exclusions/no-such-excl",
+        json={"filter": 'severity = "INFO"'},
+    )
+    assert r.status_code == 404
+
+
+def test_delete_missing_exclusion_returns_404(logging_client):
+    r = logging_client.delete(f"/v2/projects/{PROJECT}/exclusions/no-such-excl")
+    assert r.status_code == 404
