@@ -199,7 +199,8 @@ PATCH /storage/v1/b/{bucket}/o/{object}
 ```
 
 Updates mutable fields: `contentType`, `metadata`, `contentDisposition`, `cacheControl`,
-`contentEncoding`. Increments `metageneration`. Fires `OBJECT_METADATA_UPDATE` notification.
+`contentEncoding`, `temporaryHold`, `eventBasedHold`. Increments `metageneration`. Fires
+`OBJECT_METADATA_UPDATE` notification.
 
 ### List objects
 
@@ -496,6 +497,8 @@ DELETE /storage/v1/b/{bucket}/notificationConfigs/{id}
 | `contentDisposition` | string | `Content-Disposition` header value |
 | `cacheControl` | string | `Cache-Control` header value |
 | `contentEncoding` | string | `Content-Encoding` header value |
+| `temporaryHold` | bool | When `true`, blocks deletion until cleared |
+| `eventBasedHold` | bool | When `true`, blocks deletion until cleared |
 
 ---
 
@@ -511,7 +514,7 @@ The following GCS features are not emulated:
 | Signed URLs (V2 / V4) | No signed URL generation or validation |
 | XML API (S3-compatible) | Only the JSON API is supported |
 | Customer-managed encryption keys (CMEK) | Objects are stored in plaintext |
-| Object holds (`temporaryHold`, `eventBasedHold`) | Hold fields ignored |
+| Object holds — release-on-event semantics | Holds block deletion; the emulator does not model "event" release triggers — clear holds explicitly via PATCH |
 | Uniform bucket-level access | Not enforced |
 
 ---
