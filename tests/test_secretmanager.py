@@ -1,6 +1,6 @@
 """Tests for Secret Manager emulator."""
-import base64
 
+import base64
 
 PROJECT = "local-project"
 
@@ -36,9 +36,7 @@ def test_add_and_access_version(sm_client):
     version_name = r.json()["name"]
     assert "/versions/1" in version_name
 
-    r = sm_client.post(
-        f"/v1/projects/{PROJECT}/secrets/api-key/versions/latest:access"
-    )
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/api-key/versions/latest:access")
     assert r.status_code == 200
     assert r.json()["payload"]["data"] == payload
 
@@ -234,3 +232,109 @@ def test_disable_missing_version_returns_404(sm_client):
         f"/v1/projects/{PROJECT}/secrets/dis-secret/versions/99:disable",
     )
     assert r.status_code == 404
+
+
+def test_enable_version_response(sm_client):
+    """Enable returns 200 with state ENABLED and preserves the version name."""
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "en1"}, json={})
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/en1:addVersion",
+        json={"payload": {"data": base64.b64encode(b"val").decode()}},
+    )
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets/en1/versions/1:disable")
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/en1/versions/1:enable")
+    assert r.status_code == 200
+    assert r.json()["state"] == "ENABLED"
+    assert "/versions/1" in r.json()["name"]
+
+
+def test_enable_missing_version_returns_404(sm_client):
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "en2"}, json={})
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/en2/versions/99:enable")
+    assert r.status_code == 404
+
+
+def test_destroy_missing_version_returns_404(sm_client):
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "dest1"}, json={})
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/dest1/versions/99:destroy")
+    assert r.status_code == 404
+
+
+def test_destroy_disabled_version(sm_client):
+    """A disabled version can be destroyed; state becomes DESTROYED."""
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "dest2"}, json={})
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/dest2:addVersion",
+        json={"payload": {"data": base64.b64encode(b"data").decode()}},
+    )
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets/dest2/versions/1:disable")
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/dest2/versions/1:destroy")
+    assert r.status_code == 200
+    assert r.json()["state"] == "DESTROYED"
+
+
+def test_access_destroyed_version_returns_403(sm_client):
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "dest3"}, json={})
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/dest3:addVersion",
+        json={"payload": {"data": base64.b64encode(b"sensitive").decode()}},
+    )
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets/dest3/versions/1:destroy")
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/dest3/versions/1:access")
+    assert r.status_code == 403
+
+
+def test_filter_versions_by_enabled_state(sm_client):
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "filt2"}, json={})
+    for _ in range(3):
+        sm_client.post(
+            f"/v1/projects/{PROJECT}/secrets/filt2:addVersion",
+            json={"payload": {"data": base64.b64encode(b"x").decode()}},
+        )
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets/filt2/versions/2:disable")
+
+    r = sm_client.get(f"/v1/projects/{PROJECT}/secrets/filt2/versions?filter=state=ENABLED")
+    assert r.status_code == 200
+    versions = r.json()["versions"]
+    assert all(v["state"] == "ENABLED" for v in versions)
+    assert len(versions) == 2
+
+
+def test_latest_skips_disabled_versions(sm_client):
+    """Latest resolves to the highest ENABLED version, skipping disabled ones."""
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": "lat1"}, json={})
+    for i in range(3):
+        sm_client.post(
+            f"/v1/projects/{PROJECT}/secrets/lat1:addVersion",
+            json={"payload": {"data": base64.b64encode(f"v{i + 1}".encode()).decode()}},
+        )
+    # Disable the newest (v3)
+    sm_client.post(f"/v1/projects/{PROJECT}/secrets/lat1/versions/3:disable")
+
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/lat1/versions/latest:access")
+    assert r.status_code == 200
+    assert base64.b64decode(r.json()["payload"]["data"]).decode() == "v2"
+
+
+def test_list_secrets_pagination(sm_client):
+    for name in ("pa1", "pa2", "pa3", "pa4", "pa5"):
+        sm_client.post(f"/v1/projects/{PROJECT}/secrets", params={"secretId": name}, json={})
+
+    r1 = sm_client.get(f"/v1/projects/{PROJECT}/secrets?pageSize=2")
+    assert r1.status_code == 200
+    body1 = r1.json()
+    assert len(body1["secrets"]) == 2
+    assert "nextPageToken" in body1
+
+    r2 = sm_client.get(
+        f"/v1/projects/{PROJECT}/secrets?pageSize=2&pageToken={body1['nextPageToken']}"
+    )
+    body2 = r2.json()
+    assert len(body2["secrets"]) == 2
+
+    r3 = sm_client.get(
+        f"/v1/projects/{PROJECT}/secrets?pageSize=2&pageToken={body2['nextPageToken']}"
+    )
+    body3 = r3.json()
+    assert len(body3["secrets"]) == 1
+    assert "nextPageToken" not in body3

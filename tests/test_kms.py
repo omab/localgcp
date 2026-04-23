@@ -1,4 +1,5 @@
 """Tests for Cloud KMS emulator."""
+
 import base64
 
 PROJECT = "local-project"
@@ -247,15 +248,11 @@ def test_destroy_and_restore_version(kms_client):
     _ring(kms_client)
     _key(kms_client)
 
-    r = kms_client.post(
-        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:destroy"
-    )
+    r = kms_client.post(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:destroy")
     assert r.status_code == 200
     assert r.json()["state"] == "DESTROY_SCHEDULED"
 
-    r = kms_client.post(
-        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:restore"
-    )
+    r = kms_client.post(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:restore")
     assert r.status_code == 200
     assert r.json()["state"] == "DISABLED"
 
@@ -287,7 +284,142 @@ def test_decrypt_with_rotated_key(kms_client):
 def test_asymmetric_returns_501(kms_client):
     _ring(kms_client)
     _key(kms_client, purpose="ASYMMETRIC_SIGN")
-    r = kms_client.get(
-        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1/publicKey"
+    r = kms_client.get(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1/publicKey")
+    assert r.status_code == 501
+
+
+def test_asymmetric_sign_returns_501(kms_client):
+    _ring(kms_client)
+    _key(kms_client, purpose="ASYMMETRIC_SIGN")
+    r = kms_client.post(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:asymmetricSign",
+        json={"digest": {"sha256": base64.b64encode(b"x" * 32).decode()}},
     )
     assert r.status_code == 501
+
+
+def test_asymmetric_decrypt_returns_501(kms_client):
+    _ring(kms_client)
+    _key(kms_client, purpose="ASYMMETRIC_DECRYPT")
+    r = kms_client.post(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:asymmetricDecrypt",
+        json={"ciphertext": base64.b64encode(b"data").decode()},
+    )
+    assert r.status_code == 501
+
+
+def test_get_missing_crypto_key_returns_404(kms_client):
+    _ring(kms_client)
+    r = kms_client.get(f"{BASE}/keyRings/my-ring/cryptoKeys/no-such-key")
+    assert r.status_code == 404
+
+
+def test_get_crypto_key_version_by_id(kms_client):
+    _ring(kms_client)
+    _key(kms_client)
+    r = kms_client.get(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1")
+    assert r.status_code == 200
+    assert r.json()["state"] == "ENABLED"
+    assert r.json()["name"].endswith("/cryptoKeyVersions/1")
+
+
+def test_get_missing_version_returns_404(kms_client):
+    _ring(kms_client)
+    _key(kms_client)
+    r = kms_client.get(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/99")
+    assert r.status_code == 404
+
+
+def test_reenable_disabled_version(kms_client):
+    """PATCH state=ENABLED re-enables a disabled version so encrypt works again."""
+    _ring(kms_client)
+    _key(kms_client)
+
+    # Disable version 1
+    kms_client.patch(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1",
+        json={"state": "DISABLED"},
+    )
+    # Re-enable it
+    r = kms_client.patch(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1",
+        json={"state": "ENABLED"},
+    )
+    assert r.status_code == 200
+    assert r.json()["state"] == "ENABLED"
+
+    # Encrypt should now succeed again
+    r2 = kms_client.post(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key:encrypt",
+        json={"plaintext": base64.b64encode(b"data").decode()},
+    )
+    assert r2.status_code == 200
+
+
+def test_list_versions_filter_by_state(kms_client):
+    _ring(kms_client)
+    _key(kms_client)
+    # Create a second version, then disable version 1
+    kms_client.post(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions", json={})
+    kms_client.patch(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1",
+        json={"state": "DISABLED"},
+    )
+
+    r_enabled = kms_client.get(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions?filter=state=ENABLED"
+    )
+    assert r_enabled.status_code == 200
+    assert all(v["state"] == "ENABLED" for v in r_enabled.json()["cryptoKeyVersions"])
+    assert len(r_enabled.json()["cryptoKeyVersions"]) == 1
+
+    r_disabled = kms_client.get(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions?filter=state=DISABLED"
+    )
+    assert len(r_disabled.json()["cryptoKeyVersions"]) == 1
+
+
+def test_decrypt_with_destroyed_version_returns_400(kms_client):
+    """Decrypting with a ciphertext from a destroyed version raises 400."""
+    _ring(kms_client)
+    _key(kms_client)
+
+    plaintext = base64.b64encode(b"secret data").decode()
+    enc = kms_client.post(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key:encrypt",
+        json={"plaintext": plaintext},
+    )
+    ciphertext = enc.json()["ciphertext"]
+
+    # Destroy the version that encrypted it
+    kms_client.post(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:destroy")
+
+    r = kms_client.post(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/my-key:decrypt",
+        json={"ciphertext": ciphertext},
+    )
+    assert r.status_code == 400
+
+
+def test_create_version_on_missing_key_returns_404(kms_client):
+    _ring(kms_client)
+    r = kms_client.post(
+        f"{BASE}/keyRings/my-ring/cryptoKeys/ghost-key/cryptoKeyVersions",
+        json={},
+    )
+    assert r.status_code == 404
+
+
+def test_destroy_missing_version_returns_404(kms_client):
+    _ring(kms_client)
+    _key(kms_client)
+    r = kms_client.post(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/99:destroy")
+    assert r.status_code == 404
+
+
+def test_restore_non_destroy_scheduled_returns_400(kms_client):
+    """Restoring an ENABLED version (not DESTROY_SCHEDULED) returns 400."""
+    _ring(kms_client)
+    _key(kms_client)
+    r = kms_client.post(f"{BASE}/keyRings/my-ring/cryptoKeys/my-key/cryptoKeyVersions/1:restore")
+    assert r.status_code == 400
