@@ -704,3 +704,43 @@ def test_get_missing_schema_returns_404(pubsub_client):
 def test_delete_missing_schema_returns_404(pubsub_client):
     r = pubsub_client.delete(f"/v1/{PROJECT}/schemas/no-such-schema")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Topic update (PATCH)
+# ---------------------------------------------------------------------------
+
+
+def test_update_topic_labels(pubsub_client):
+    topic = f"{PROJECT}/topics/upd-topic"
+    pubsub_client.put(f"/v1/{topic}")
+
+    r = pubsub_client.patch(
+        f"/v1/{topic}",
+        json={"labels": {"env": "staging", "team": "platform"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["labels"]["env"] == "staging"
+
+    r2 = pubsub_client.get(f"/v1/{topic}")
+    assert r2.json()["labels"]["team"] == "platform"
+
+
+def test_update_topic_retention(pubsub_client):
+    topic = f"{PROJECT}/topics/ret-topic"
+    pubsub_client.put(f"/v1/{topic}", json={"messageRetentionDuration": "3600s"})
+
+    r = pubsub_client.patch(
+        f"/v1/{topic}",
+        json={"messageRetentionDuration": "7200s"},
+    )
+    assert r.status_code == 200
+    assert r.json()["messageRetentionDuration"] == "7200s"
+
+
+def test_update_missing_topic_returns_404(pubsub_client):
+    r = pubsub_client.patch(
+        f"/v1/{PROJECT}/topics/no-such-topic",
+        json={"labels": {"x": "y"}},
+    )
+    assert r.status_code == 404
