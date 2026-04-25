@@ -76,8 +76,9 @@ POST /v1/projects/{project}/locations/{location}/keyRings/{ring_id}/cryptoKeys?c
 }
 ```
 
-Supported purposes: `ENCRYPT_DECRYPT`. Asymmetric purposes (`ASYMMETRIC_SIGN`,
-`ASYMMETRIC_DECRYPT`) are accepted and stored but the cryptographic operations return `501`.
+Supported purposes: `ENCRYPT_DECRYPT`, `ASYMMETRIC_SIGN`, and `ASYMMETRIC_DECRYPT`.
+For asymmetric keys, specify the algorithm in `versionTemplate.algorithm`
+(e.g. `EC_SIGN_P256_SHA256`, `RSA_SIGN_PSS_2048_SHA256`, `RSA_DECRYPT_OAEP_2048_SHA256`).
 
 Creating a key automatically creates version `1` as the primary version. Returns the key
 resource including the `primary` version pointer.
@@ -274,13 +275,72 @@ material, enabling transparent cross-version decryption after rotation.
 
 ---
 
-## Asymmetric operations (stubs)
+## Asymmetric operations
 
-The following endpoints are accepted but return `501 Not Implemented`:
+### Get public key
 
-- `GET .../cryptoKeyVersions/{version_id}/publicKey`
-- `POST .../cryptoKeyVersions/{version_id}:asymmetricSign`
-- `POST .../cryptoKeyVersions/{version_id}:asymmetricDecrypt`
+```
+GET /v1/projects/{project}/locations/{location}/keyRings/{ring_id}/cryptoKeys/{key_id}/cryptoKeyVersions/{version_id}/publicKey
+```
+
+Returns the PEM-encoded public key for an `ASYMMETRIC_SIGN` or `ASYMMETRIC_DECRYPT` version:
+
+```json
+{
+  "pem": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
+  "algorithm": "EC_SIGN_P256_SHA256",
+  "name": "projects/.../cryptoKeyVersions/1",
+  "protectionLevel": "SOFTWARE"
+}
+```
+
+### Asymmetric sign
+
+```
+POST /v1/projects/{project}/locations/{location}/keyRings/{ring_id}/cryptoKeys/{key_id}/cryptoKeyVersions/{version_id}:asymmetricSign
+```
+
+Signs a **pre-computed digest** (not the raw message). The request body must contain
+exactly one of `sha256`, `sha384`, or `sha512` inside the `digest` field:
+
+```json
+{ "digest": { "sha256": "<base64-encoded SHA-256 digest>" } }
+```
+
+Response:
+
+```json
+{ "signature": "<base64-encoded DER signature>", "name": "...", "protectionLevel": "SOFTWARE" }
+```
+
+Supported algorithms:
+
+| Algorithm | Key type | Digest |
+|---|---|---|
+| `EC_SIGN_P256_SHA256` | EC P-256 | SHA-256 |
+| `EC_SIGN_P384_SHA384` | EC P-384 | SHA-384 |
+| `RSA_SIGN_PSS_2048_SHA256` | RSA 2048 | SHA-256 |
+| `RSA_SIGN_PSS_3072_SHA256` | RSA 3072 | SHA-256 |
+| `RSA_SIGN_PSS_4096_SHA256` | RSA 4096 | SHA-256 |
+
+### Asymmetric decrypt
+
+```
+POST /v1/projects/{project}/locations/{location}/keyRings/{ring_id}/cryptoKeys/{key_id}/cryptoKeyVersions/{version_id}:asymmetricDecrypt
+```
+
+Decrypts data encrypted with the corresponding public key using RSA-OAEP.
+Requires an `ASYMMETRIC_DECRYPT` key (e.g. `RSA_DECRYPT_OAEP_2048_SHA256`).
+
+```json
+{ "ciphertext": "<base64-encoded ciphertext>" }
+```
+
+Response:
+
+```json
+{ "plaintext": "<base64-encoded plaintext>", "protectionLevel": "SOFTWARE" }
+```
 
 ---
 
@@ -288,7 +348,6 @@ The following endpoints are accepted but return `501 Not Implemented`:
 
 | Feature | Notes |
 |---|---|
-| Asymmetric sign / verify | Returns `501` — RSA and EC key operations not yet implemented |
 | MAC keys (HMAC) | Not implemented |
 | Key import | `ImportJob` endpoints not implemented |
 | Key deletion | GCP does not allow key ring or key deletion; `DELETE` is not implemented |
