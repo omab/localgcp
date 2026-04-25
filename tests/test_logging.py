@@ -1000,3 +1000,185 @@ def test_list_entries_default_descending_order(logging_client):
     entries = r.json()["entries"]
     timestamps = [e["timestamp"] for e in entries]
     assert timestamps == sorted(timestamps, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Advanced filter: AND / OR / NOT / parentheses / operators / dot-paths
+# ---------------------------------------------------------------------------
+
+
+def _write_entries(client, entries):
+    client.post("/v2/entries:write", json={"entries": entries})
+
+
+def test_filter_or_severity(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "ERROR", "textPayload": "err"},
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "WARNING", "textPayload": "warn"},
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "INFO", "textPayload": "info"},
+        ],
+    )
+    r = _list(logging_client, filter_str="severity=ERROR OR severity=WARNING")
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert "err" in payloads
+    assert "warn" in payloads
+    assert "info" not in payloads
+
+
+def test_filter_not_severity(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "ERROR", "textPayload": "err"},
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "INFO", "textPayload": "info"},
+        ],
+    )
+    r = _list(logging_client, filter_str="NOT severity=ERROR")
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert "err" not in payloads
+    assert "info" in payloads
+
+
+def test_filter_and_explicit(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/app", "severity": "ERROR", "textPayload": "yes"},
+            {
+                "logName": f"projects/{PROJECT}/logs/app",
+                "severity": "INFO",
+                "textPayload": "no-sev",
+            },
+            {
+                "logName": f"projects/{PROJECT}/logs/sys",
+                "severity": "ERROR",
+                "textPayload": "no-log",
+            },
+        ],
+    )
+    r = _list(
+        logging_client,
+        filter_str=f'logName="projects/{PROJECT}/logs/app" AND severity=ERROR',
+    )
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert payloads == ["yes"]
+
+
+def test_filter_parentheses_grouping(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "ERROR", "textPayload": "a"},
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "WARNING", "textPayload": "b"},
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "DEBUG", "textPayload": "c"},
+        ],
+    )
+    r = _list(
+        logging_client,
+        filter_str="(severity=ERROR OR severity=WARNING) AND NOT severity=DEBUG",
+    )
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert "a" in payloads
+    assert "b" in payloads
+    assert "c" not in payloads
+
+
+def test_filter_contains_operator(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/l", "textPayload": "hello world"},
+            {"logName": f"projects/{PROJECT}/logs/l", "textPayload": "goodbye"},
+        ],
+    )
+    r = _list(logging_client, filter_str='textPayload:"hello"')
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert "hello world" in payloads
+    assert "goodbye" not in payloads
+
+
+def test_filter_not_equal(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "ERROR", "textPayload": "err"},
+            {"logName": f"projects/{PROJECT}/logs/l", "severity": "INFO", "textPayload": "info"},
+        ],
+    )
+    r = _list(logging_client, filter_str="severity!=ERROR")
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert "err" not in payloads
+    assert "info" in payloads
+
+
+def test_filter_resource_labels(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {
+                "logName": f"projects/{PROJECT}/logs/l",
+                "textPayload": "match",
+                "resource": {"type": "gce_instance", "labels": {"zone": "us-central1-a"}},
+            },
+            {
+                "logName": f"projects/{PROJECT}/logs/l",
+                "textPayload": "no-match",
+                "resource": {"type": "gce_instance", "labels": {"zone": "us-east1-b"}},
+            },
+        ],
+    )
+    r = _list(logging_client, filter_str='resource.labels.zone="us-central1-a"')
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert "match" in payloads
+    assert "no-match" not in payloads
+
+
+def test_filter_json_payload_field(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {
+                "logName": f"projects/{PROJECT}/logs/l",
+                "jsonPayload": {"userId": "u1", "action": "login"},
+            },
+            {
+                "logName": f"projects/{PROJECT}/logs/l",
+                "jsonPayload": {"userId": "u2", "action": "logout"},
+            },
+        ],
+    )
+    r = _list(logging_client, filter_str='jsonPayload.userId="u1"')
+    entries = r.json()["entries"]
+    assert len(entries) == 1
+    assert entries[0]["jsonPayload"]["userId"] == "u1"
+
+
+def test_filter_implicit_and(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/app", "severity": "ERROR", "textPayload": "yes"},
+            {"logName": f"projects/{PROJECT}/logs/app", "severity": "INFO", "textPayload": "no"},
+        ],
+    )
+    # No explicit AND keyword between clauses
+    r = _list(
+        logging_client,
+        filter_str=f'logName="projects/{PROJECT}/logs/app" severity=ERROR',
+    )
+    payloads = [e.get("textPayload") for e in r.json()["entries"]]
+    assert payloads == ["yes"]
+
+
+def test_filter_empty_matches_all(logging_client):
+    _write_entries(
+        logging_client,
+        [
+            {"logName": f"projects/{PROJECT}/logs/l", "textPayload": "a"},
+            {"logName": f"projects/{PROJECT}/logs/l", "textPayload": "b"},
+        ],
+    )
+    r = _list(logging_client, filter_str="")
+    assert len(r.json()["entries"]) == 2

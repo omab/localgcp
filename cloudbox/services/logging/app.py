@@ -29,6 +29,7 @@ from fastapi import FastAPI, Request
 
 from cloudbox.core.errors import GCPError, add_gcp_exception_handler
 from cloudbox.core.middleware import add_request_logging
+from cloudbox.services.logging.filter import matches as filter_matches
 from cloudbox.services.logging.store import get_store
 
 app = FastAPI(title="Cloudbox — Cloud Logging", version="v2")
@@ -83,82 +84,22 @@ def _store():
 # Filter helpers
 # ---------------------------------------------------------------------------
 
-_TIMESTAMP_PATTERN = re.compile(
-    r'timestamp\s*(>=|<=|>|<|=)\s*["\']?(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)["\']?',
-    re.IGNORECASE,
-)
-_LOGNAME_PATTERN = re.compile(
-    r'logName\s*=\s*["\']([^"\']+)["\']',
-    re.IGNORECASE,
-)
-_SEVERITY_PATTERN = re.compile(
-    r'severity\s*(>=|<=|>|<|=)\s*["\']?(\w+)["\']?',
-    re.IGNORECASE,
-)
-_RESOURCE_TYPE_PATTERN = re.compile(
-    r'resource\.type\s*=\s*["\']([^"\']+)["\']',
-    re.IGNORECASE,
-)
-
 
 def _matches_filter(entry: dict, filter_str: str) -> bool:
-    """Apply basic log filter expressions to a log entry.
+    """Apply a Cloud Logging filter expression to a log entry.
+
+    Delegates to the filter module which supports AND/OR/NOT, parentheses,
+    dot-notation field paths, all comparison operators, and the : (contains)
+    operator.
 
     Args:
-        entry (dict): Log entry dict with logName, severity, timestamp, and resource fields.
-        filter_str (str): Log filter expression supporting logName, severity, timestamp,
-            and resource.type clauses.
+        entry (dict): Log entry dict.
+        filter_str (str): Cloud Logging filter expression.
 
     Returns:
-        bool: True if the entry matches all clauses in filter_str, or filter_str is empty.
+        bool: True if the entry matches, or filter_str is empty.
     """
-    if not filter_str:
-        return True
-
-    # logName filter
-    for m in _LOGNAME_PATTERN.finditer(filter_str):
-        if entry.get("logName", "") != m.group(1):
-            return False
-
-    # severity filter
-    for m in _SEVERITY_PATTERN.finditer(filter_str):
-        op = m.group(1)
-        target = m.group(2).upper()
-        entry_sev = entry.get("severity", "DEFAULT").upper()
-        ev = _SEVERITY_ORDER.get(entry_sev, 0)
-        tv = _SEVERITY_ORDER.get(target, 0)
-        if op == ">=" and not (ev >= tv):
-            return False
-        elif op == "<=" and not (ev <= tv):
-            return False
-        elif op == ">" and not (ev > tv):
-            return False
-        elif op == "<" and not (ev < tv):
-            return False
-        elif op == "=" and not (ev == tv):
-            return False
-
-    # timestamp filters
-    for m in _TIMESTAMP_PATTERN.finditer(filter_str):
-        op = m.group(1)
-        ts_str = m.group(2)
-        entry_ts = entry.get("timestamp", "")
-        if entry_ts and ts_str:
-            if op == ">=" and not (entry_ts >= ts_str):
-                return False
-            elif op == "<=" and not (entry_ts <= ts_str):
-                return False
-            elif op == ">" and not (entry_ts > ts_str):
-                return False
-            elif op == "<" and not (entry_ts < ts_str):
-                return False
-
-    # resource.type filter
-    for m in _RESOURCE_TYPE_PATTERN.finditer(filter_str):
-        if entry.get("resource", {}).get("type", "") != m.group(1):
-            return False
-
-    return True
+    return filter_matches(filter_str, entry)
 
 
 # ---------------------------------------------------------------------------
