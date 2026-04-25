@@ -85,6 +85,7 @@ async def create_job(project: str, location: str, request: Request):
         timeZone=body.get("timeZone", "UTC"),
         state="ENABLED",
         httpTarget=body.get("httpTarget"),
+        pubsubTarget=body.get("pubsubTarget"),
         retryConfig=body.get("retryConfig", {}),
         userUpdateTime=now,
         scheduleTime=_next_run_time(schedule, datetime.now(UTC)) if schedule else "",
@@ -161,7 +162,7 @@ async def update_job(project: str, location: str, job_id: str, request: Request)
         raise GCPError(404, f"Job not found: {full_name}")
     body = await request.json()
     # Merge fields
-    for key in ("description", "schedule", "timeZone", "httpTarget", "retryConfig"):
+    for key in ("description", "schedule", "timeZone", "httpTarget", "pubsubTarget", "retryConfig"):
         if key in body:
             existing[key] = body[key]
     existing["userUpdateTime"] = _now()
@@ -221,15 +222,11 @@ async def run_job(project: str, location: str, job_id: str):
     if data is None:
         raise GCPError(404, f"Job not found: {full_name}")
 
-    http_target = data.get("httpTarget")
-    if http_target:
-        import httpx
-
+    if data.get("httpTarget") or data.get("pubsubTarget"):
         now = _now()
         data["lastAttemptTime"] = now
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await _dispatch(client, http_target)
+            await _dispatch(data)
             data["status"] = {}
         except Exception as exc:
             data["status"] = {"code": 2, "message": str(exc)}

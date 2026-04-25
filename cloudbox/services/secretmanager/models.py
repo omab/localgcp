@@ -34,6 +34,8 @@ class SecretModel(BaseModel):
     createTime: str = Field(default_factory=_now)
     labels: dict[str, str] = Field(default_factory=dict)
     etag: str = "1"
+    topics: list[dict] = Field(default_factory=list)
+    kmsKeyName: str = ""
 
 
 class SecretVersionState:

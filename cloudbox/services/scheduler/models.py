@@ -16,6 +16,14 @@ class HttpTarget(BaseModel):
     body: str = ""  # base64-encoded
 
 
+class PubsubTarget(BaseModel):
+    """Pub/Sub target configuration for a scheduled job."""
+
+    topicName: str
+    data: str = ""  # base64-encoded message data
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
 class RetryConfig(BaseModel):
     """Retry policy for a Cloud Scheduler job."""
 
@@ -35,6 +43,7 @@ class JobModel(BaseModel):
     timeZone: str = "UTC"
     state: str = "ENABLED"  # ENABLED, PAUSED, DISABLED
     httpTarget: HttpTarget | None = None
+    pubsubTarget: PubsubTarget | None = None
     retryConfig: RetryConfig = Field(default_factory=RetryConfig)
     userUpdateTime: str = ""
     scheduleTime: str = ""  # next scheduled run

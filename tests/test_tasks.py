@@ -492,3 +492,70 @@ def test_run_missing_task_returns_404(tasks_client):
     )
     r = tasks_client.post(f"{BASE}/queues/run-q2/tasks/nonexistent-task:run")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Deduplication
+# ---------------------------------------------------------------------------
+
+
+def test_named_task_tombstone_prevents_recreate(tasks_client):
+    tasks_client.post(
+        f"{BASE}/queues",
+        json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/dedup-q"},
+    )
+    tasks_client.post(
+        f"{BASE}/queues/dedup-q/tasks",
+        json={
+            "task": {
+                "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/dedup-q/tasks/named-t",
+                "httpRequest": {"url": "http://localhost/noop", "httpMethod": "POST"},
+            }
+        },
+    )
+    tasks_client.delete(f"{BASE}/queues/dedup-q/tasks/named-t")
+
+    # Recreating within the dedup window should fail
+    r = tasks_client.post(
+        f"{BASE}/queues/dedup-q/tasks",
+        json={
+            "task": {
+                "name": f"projects/{PROJECT}/locations/{LOCATION}/queues/dedup-q/tasks/named-t",
+                "httpRequest": {"url": "http://localhost/noop", "httpMethod": "POST"},
+            }
+        },
+    )
+    assert r.status_code == 409
+
+
+def test_content_dedup_rejects_identical_body(tasks_client):
+    tasks_client.post(
+        f"{BASE}/queues",
+        json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/content-q"},
+    )
+    task_body = {"task": {"httpRequest": {"url": "http://localhost/dedup", "httpMethod": "POST"}}}
+
+    r1 = tasks_client.post(f"{BASE}/queues/content-q/tasks", json=task_body)
+    assert r1.status_code == 200
+
+    r2 = tasks_client.post(f"{BASE}/queues/content-q/tasks", json=task_body)
+    assert r2.status_code == 409
+
+
+def test_content_dedup_allows_different_bodies(tasks_client):
+    tasks_client.post(
+        f"{BASE}/queues",
+        json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/diff-q"},
+    )
+
+    r1 = tasks_client.post(
+        f"{BASE}/queues/diff-q/tasks",
+        json={"task": {"httpRequest": {"url": "http://localhost/a", "httpMethod": "POST"}}},
+    )
+    assert r1.status_code == 200
+
+    r2 = tasks_client.post(
+        f"{BASE}/queues/diff-q/tasks",
+        json={"task": {"httpRequest": {"url": "http://localhost/b", "httpMethod": "POST"}}},
+    )
+    assert r2.status_code == 200

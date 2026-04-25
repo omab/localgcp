@@ -324,3 +324,77 @@ def test_pause_missing_job_returns_404(scheduler_client):
 def test_resume_missing_job_returns_404(scheduler_client):
     r = scheduler_client.post(f"{BASE}/no-such-job:resume")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Pub/Sub target
+# ---------------------------------------------------------------------------
+
+
+def test_create_pubsub_target_job(scheduler_client, pubsub_client):
+    topic = f"projects/{PROJECT}/topics/sched-topic"
+    pubsub_client.put(f"/v1/{topic}")
+    sub = f"projects/{PROJECT}/subscriptions/sched-sub"
+    pubsub_client.put(f"/v1/{sub}", json={"name": sub, "topic": topic})
+
+    r = scheduler_client.post(
+        BASE,
+        json={
+            "name": f"{BASE.replace('/jobs', '')}/jobs/ps-job",
+            "schedule": "* * * * *",
+            "timeZone": "UTC",
+            "pubsubTarget": {
+                "topicName": topic,
+                "data": "aGVsbG8=",  # base64("hello")
+                "attributes": {"env": "test"},
+            },
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pubsubTarget"]["topicName"] == topic
+
+
+def test_run_pubsub_target_job_delivers_message(scheduler_client, pubsub_client):
+    topic = f"projects/{PROJECT}/topics/run-ps-topic"
+    pubsub_client.put(f"/v1/{topic}")
+    sub = f"projects/{PROJECT}/subscriptions/run-ps-sub"
+    pubsub_client.put(f"/v1/{sub}", json={"name": sub, "topic": topic})
+
+    scheduler_client.post(
+        BASE,
+        json={
+            "name": f"{BASE.replace('/jobs', '')}/jobs/run-ps-job",
+            "schedule": "* * * * *",
+            "timeZone": "UTC",
+            "pubsubTarget": {
+                "topicName": topic,
+                "data": "aGVsbG8=",
+            },
+        },
+    )
+
+    r = scheduler_client.post(f"{BASE}/run-ps-job:run")
+    assert r.status_code == 200
+    assert r.json()["lastAttemptTime"] != ""
+
+    r2 = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    msgs = r2.json()["receivedMessages"]
+    assert len(msgs) == 1
+    assert msgs[0]["message"]["data"] == "aGVsbG8="
+
+
+def test_run_pubsub_job_missing_topic_records_error(scheduler_client):
+    scheduler_client.post(
+        BASE,
+        json={
+            "name": f"{BASE.replace('/jobs', '')}/jobs/bad-ps-job",
+            "schedule": "* * * * *",
+            "timeZone": "UTC",
+            "pubsubTarget": {"topicName": "projects/x/topics/ghost"},
+        },
+    )
+
+    r = scheduler_client.post(f"{BASE}/bad-ps-job:run")
+    assert r.status_code == 200
+    assert "message" in r.json()["status"]

@@ -144,23 +144,18 @@ def _next_run_time(schedule: str, base: datetime) -> str:
 async def dispatch_loop() -> None:
     """Run forever, dispatching jobs that are due.
 
-    Starts an httpx AsyncClient and calls _tick every _POLL_INTERVAL seconds until cancelled.
+    Calls _tick every _POLL_INTERVAL seconds until cancelled.
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        while True:
-            try:
-                await _tick(client)
-            except Exception:
-                logger.exception("Scheduler worker tick error")
-            await asyncio.sleep(_POLL_INTERVAL)
+    while True:
+        try:
+            await _tick()
+        except Exception:
+            logger.exception("Scheduler worker tick error")
+        await asyncio.sleep(_POLL_INTERVAL)
 
 
-async def _tick(client: httpx.AsyncClient) -> None:
-    """Process one scheduler poll: dispatch all ENABLED jobs that are due.
-
-    Args:
-        client (httpx.AsyncClient): Shared HTTP client used for job dispatch.
-    """
+async def _tick() -> None:
+    """Process one scheduler poll: dispatch all ENABLED jobs that are due."""
     store = get_store()
     now = _now_utc()
     now_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -184,8 +179,7 @@ async def _tick(client: httpx.AsyncClient) -> None:
             if not _is_due(schedule, job.get("lastAttemptTime", ""), now):
                 continue
 
-        http_target = job.get("httpTarget")
-        if not http_target:
+        if not job.get("httpTarget") and not job.get("pubsubTarget"):
             continue
 
         job_name = job["name"]
@@ -200,7 +194,7 @@ async def _tick(client: httpx.AsyncClient) -> None:
             logger.info("Retrying job %s (attempt %d)", job_name, retry_attempt + 1)
 
         try:
-            await _dispatch(client, http_target)
+            await _dispatch(job)
             job["status"] = {}
             _clear_retry_state(job)
         except Exception as exc:
@@ -262,7 +256,28 @@ def _clear_retry_state(job: dict) -> None:
         job.pop(key, None)
 
 
-async def _dispatch(client: httpx.AsyncClient, http_target: dict) -> None:
+async def _dispatch(job: dict) -> None:
+    """Dispatch a job to its configured target (HTTP or Pub/Sub).
+
+    Args:
+        job (dict): Job dict; dispatches to httpTarget or pubsubTarget depending on which is set.
+
+    Raises:
+        RuntimeError: If the HTTP response is 400+, the Pub/Sub topic is missing, or no target
+            is configured.
+    """
+    http_target = job.get("httpTarget")
+    pubsub_target = job.get("pubsubTarget")
+    if http_target:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            await _dispatch_http(client, http_target)
+    elif pubsub_target:
+        await _dispatch_pubsub(pubsub_target)
+    else:
+        raise RuntimeError("Job has no configured target")
+
+
+async def _dispatch_http(client: httpx.AsyncClient, http_target: dict) -> None:
     """Send an HTTP request for a scheduled job's httpTarget.
 
     Args:
@@ -281,3 +296,40 @@ async def _dispatch(client: httpx.AsyncClient, http_target: dict) -> None:
     resp = await client.request(method, uri, headers=headers, content=body)
     if resp.status_code >= 400:
         raise RuntimeError(f"HTTP {resp.status_code}")
+
+
+async def _dispatch_pubsub(pubsub_target: dict) -> None:
+    """Publish a message to a Pub/Sub topic for a scheduled job's pubsubTarget.
+
+    Args:
+        pubsub_target (dict): Job pubsubTarget dict with topicName, data, and attributes.
+
+    Raises:
+        RuntimeError: If the configured topic does not exist.
+    """
+    import uuid
+    from datetime import UTC, datetime
+
+    from cloudbox.services.pubsub.store import enqueue, ensure_queue
+    from cloudbox.services.pubsub.store import get_store as pubsub_store
+
+    topic_name = pubsub_target.get("topicName", "")
+    data_b64 = pubsub_target.get("data", "")
+    attributes = dict(pubsub_target.get("attributes", {}))
+
+    store = pubsub_store()
+    if not store.exists("topics", topic_name):
+        raise RuntimeError(f"Pub/Sub topic not found: {topic_name}")
+
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    message = {
+        "data": data_b64,
+        "attributes": attributes,
+        "messageId": uuid.uuid4().hex,
+        "publishTime": now,
+        "orderingKey": "",
+    }
+    for sub in store.list("subscriptions"):
+        if sub["topic"] == topic_name:
+            ensure_queue(sub["name"])
+            enqueue(sub["name"], message)

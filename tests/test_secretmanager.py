@@ -338,3 +338,115 @@ def test_list_secrets_pagination(sm_client):
     body3 = r3.json()
     assert len(body3["secrets"]) == 1
     assert "nextPageToken" not in body3
+
+
+# ---------------------------------------------------------------------------
+# Rotation notifications (Pub/Sub)
+# ---------------------------------------------------------------------------
+
+
+def test_rotation_notification_published_on_add_version(sm_client, pubsub_client):
+    topic = f"projects/{PROJECT}/topics/rotation-topic"
+    pubsub_client.put(f"/v1/{topic}")
+    sub = f"projects/{PROJECT}/subscriptions/rotation-sub"
+    pubsub_client.put(f"/v1/{sub}", json={"name": sub, "topic": topic})
+
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets",
+        params={"secretId": "notif-secret"},
+        json={"topics": [{"name": topic}]},
+    )
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/notif-secret:addVersion",
+        json={"payload": {"data": base64.b64encode(b"val").decode()}},
+    )
+
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    msgs = r.json()["receivedMessages"]
+    assert len(msgs) == 1
+    import json
+
+    payload = json.loads(base64.b64decode(msgs[0]["message"]["data"]))
+    assert "versions/1" in payload["name"]
+
+
+def test_no_notification_when_topic_missing(sm_client):
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets",
+        params={"secretId": "no-topic-secret"},
+        json={"topics": [{"name": "projects/x/topics/ghost"}]},
+    )
+    r = sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/no-topic-secret:addVersion",
+        json={"payload": {"data": base64.b64encode(b"val").decode()}},
+    )
+    assert r.status_code == 200  # no error even if topic doesn't exist
+
+
+def test_update_secret_adds_topic(sm_client, pubsub_client):
+    topic = f"projects/{PROJECT}/topics/update-topic"
+    pubsub_client.put(f"/v1/{topic}")
+    sub = f"projects/{PROJECT}/subscriptions/update-sub"
+    pubsub_client.put(f"/v1/{sub}", json={"name": sub, "topic": topic})
+
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets",
+        params={"secretId": "upd-secret"},
+        json={},
+    )
+    sm_client.patch(
+        f"/v1/projects/{PROJECT}/secrets/upd-secret",
+        json={"topics": [{"name": topic}]},
+    )
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/upd-secret:addVersion",
+        json={"payload": {"data": base64.b64encode(b"x").decode()}},
+    )
+
+    r = pubsub_client.post(f"/v1/{sub}:pull", json={"maxMessages": 1})
+    assert len(r.json()["receivedMessages"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# CMEK via Cloud KMS
+# ---------------------------------------------------------------------------
+
+
+def test_cmek_encrypt_decrypt_roundtrip(sm_client, kms_client):
+    base = f"/v1/projects/{PROJECT}/locations/us-central1"
+    kms_client.post(f"{base}/keyRings", params={"keyRingId": "sm-ring"}, json={})
+    kms_client.post(
+        f"{base}/keyRings/sm-ring/cryptoKeys",
+        params={"cryptoKeyId": "sm-key"},
+        json={"purpose": "ENCRYPT_DECRYPT"},
+    )
+    kms_key = f"projects/{PROJECT}/locations/us-central1/keyRings/sm-ring/cryptoKeys/sm-key"
+
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets",
+        params={"secretId": "cmek-secret"},
+        json={"kmsKeyName": kms_key},
+    )
+    plaintext = b"super-secret-value"
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/cmek-secret:addVersion",
+        json={"payload": {"data": base64.b64encode(plaintext).decode()}},
+    )
+
+    r = sm_client.post(f"/v1/projects/{PROJECT}/secrets/cmek-secret/versions/1:access")
+    assert r.status_code == 200
+    recovered = base64.b64decode(r.json()["payload"]["data"])
+    assert recovered == plaintext
+
+
+def test_cmek_missing_key_returns_error(sm_client):
+    sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets",
+        params={"secretId": "bad-cmek"},
+        json={"kmsKeyName": "projects/x/locations/us/keyRings/r/cryptoKeys/ghost"},
+    )
+    r = sm_client.post(
+        f"/v1/projects/{PROJECT}/secrets/bad-cmek:addVersion",
+        json={"payload": {"data": base64.b64encode(b"x").decode()}},
+    )
+    assert r.status_code == 404

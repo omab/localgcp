@@ -5,6 +5,8 @@ Implements the Secret Manager REST API v1 used by google-cloud-secret-manager.
 
 from __future__ import annotations
 
+import base64
+
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -86,6 +88,103 @@ def _resolve_version(secret_name: str, version_id: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# CMEK and rotation notification helpers
+# ---------------------------------------------------------------------------
+
+
+def _kms_encrypt(kms_key_name: str, plaintext_b64: str) -> str:
+    """Encrypt a base64-encoded payload using a KMS ENCRYPT_DECRYPT key.
+
+    Args:
+        kms_key_name (str): Full KMS CryptoKey resource name.
+        plaintext_b64 (str): Base64-encoded plaintext to encrypt.
+
+    Returns:
+        str: Base64-encoded encrypted blob.
+
+    Raises:
+        GCPError: If the KMS key is not found or has no enabled primary version.
+    """
+    from cloudbox.services.kms.app import _encrypt_payload
+    from cloudbox.services.kms.store import get_store as kms_store
+
+    ck_data = kms_store().get("cryptokeys", kms_key_name)
+    if ck_data is None:
+        raise GCPError(404, f"KMS key {kms_key_name} not found")
+    primary = ck_data.get("primary") or {}
+    version_name = primary.get("name", "")
+    if not version_name:
+        raise GCPError(400, f"KMS key {kms_key_name} has no enabled primary version")
+    plaintext = base64.b64decode(plaintext_b64) if plaintext_b64 else b""
+    blob = _encrypt_payload(version_name, plaintext, None)
+    return base64.b64encode(blob).decode()
+
+
+def _kms_decrypt(kms_key_name: str, ciphertext_b64: str) -> str:
+    """Decrypt a base64-encoded blob encrypted by ``_kms_encrypt``.
+
+    Args:
+        kms_key_name (str): Full KMS CryptoKey resource name (used only for error context).
+        ciphertext_b64 (str): Base64-encoded encrypted blob.
+
+    Returns:
+        str: Base64-encoded plaintext.
+
+    Raises:
+        GCPError: If decryption fails.
+    """
+    from cloudbox.services.kms.app import _decrypt_payload
+
+    blob = base64.b64decode(ciphertext_b64)
+    _, plaintext = _decrypt_payload(blob, None)
+    return base64.b64encode(plaintext).decode()
+
+
+def _publish_rotation_notifications(secret_data: dict, version_name: str) -> None:
+    """Publish a rotation notification to each Pub/Sub topic configured on the secret.
+
+    Args:
+        secret_data (dict): Secret resource dict containing the topics list.
+        version_name (str): Full resource name of the newly added version.
+    """
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    from cloudbox.services.pubsub.store import enqueue, ensure_queue
+    from cloudbox.services.pubsub.store import get_store as pubsub_store
+
+    topics = secret_data.get("topics", [])
+    if not topics:
+        return
+
+    ps_store = pubsub_store()
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    payload = base64.b64encode(json.dumps({"name": version_name}).encode()).decode()
+    secret_id = (
+        version_name.split("/secrets/")[1].split("/")[0] if "/secrets/" in version_name else ""
+    )
+
+    for topic_entry in topics:
+        topic_name = (
+            topic_entry.get("name", "") if isinstance(topic_entry, dict) else str(topic_entry)
+        )
+        if not topic_name or not ps_store.exists("topics", topic_name):
+            continue
+        message = {
+            "data": payload,
+            "attributes": {"secretId": secret_id, "eventType": "SECRET_VERSION_ADD"},
+            "messageId": uuid.uuid4().hex,
+            "publishTime": now,
+            "orderingKey": "",
+        }
+        for sub in ps_store.list("subscriptions"):
+            if sub["topic"] == topic_name:
+                ensure_queue(sub["name"])
+                enqueue(sub["name"], message)
+
+
+# ---------------------------------------------------------------------------
 # Secrets
 # ---------------------------------------------------------------------------
 
@@ -117,6 +216,8 @@ async def create_secret(project: str, request: Request):
     secret = SecretModel(
         name=name,
         labels=body.get("labels", {}),
+        topics=body.get("topics", []),
+        kmsKeyName=body.get("kmsKeyName", ""),
     )
     store.set("secrets", name, secret.model_dump())
     return JSONResponse(status_code=200, content=secret.model_dump())
@@ -193,8 +294,9 @@ async def update_secret(project: str, secret_id: str, request: Request):
     if data is None:
         raise GCPError(404, f"Secret {name} not found.")
     body = await request.json()
-    if "labels" in body:
-        data["labels"] = body["labels"]
+    for field in ("labels", "topics", "kmsKeyName"):
+        if field in body:
+            data[field] = body[field]
     store.set("secrets", name, data)
     return data
 
@@ -254,9 +356,17 @@ async def add_version(project: str, secret_id: str, body: AddVersionRequest):
     n = _version_number(secret_name)
     version_name = f"{secret_name}/versions/{n}"
 
+    raw_data = body.payload.get("data", "")
+    secret_data = store.get("secrets", secret_name) or {}
+    kms_key = secret_data.get("kmsKeyName", "")
+    if kms_key:
+        raw_data = _kms_encrypt(kms_key, raw_data)
+
     version = SecretVersionModel(name=version_name)
     store.set("versions", version_name, version.model_dump())
-    store.set("payloads", version_name, body.payload.get("data", ""))
+    store.set("payloads", version_name, raw_data)
+
+    _publish_rotation_notifications(secret_data, version_name)
 
     return version.model_dump()
 
@@ -358,10 +468,15 @@ async def access_version(project: str, secret_id: str, version_id: str):
     if version_data and version_data.get("state") != SecretVersionState.ENABLED:
         raise GCPError(403, f"Secret version {version_key} is not enabled.")
 
-    data = store.get("payloads", version_key) or ""
+    raw_data = store.get("payloads", version_key) or ""
+    secret_data = store.get("secrets", secret_name) or {}
+    kms_key = secret_data.get("kmsKeyName", "")
+    if kms_key and raw_data:
+        raw_data = _kms_decrypt(kms_key, raw_data)
+
     return AccessSecretVersionResponse(
         name=version_key,
-        payload={"data": data},
+        payload={"data": raw_data},
     ).model_dump()
 
 

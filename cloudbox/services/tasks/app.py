@@ -6,6 +6,9 @@ Implements the Cloud Tasks REST API v2 used by google-cloud-tasks.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -48,6 +51,9 @@ add_gcp_exception_handler(app)
 add_request_logging(app, "tasks")
 
 
+_DEDUP_WINDOW_S = 3600  # 1 hour, matching Cloud Tasks' named-task dedup window
+
+
 def _store():
     """Return the Cloud Tasks store instance.
 
@@ -55,6 +61,52 @@ def _store():
         NamespacedStore: The shared Cloud Tasks store.
     """
     return get_store()
+
+
+def _task_body_hash(task_data: dict) -> str:
+    """Compute a stable SHA-256 hash of a task's HTTP request for content-based dedup.
+
+    Args:
+        task_data (dict): Raw task dict from the create request body.
+
+    Returns:
+        str: Hex SHA-256 digest of the task's url, method, and body fields.
+    """
+    http_req = task_data.get("httpRequest", {})
+    key = json.dumps(
+        {
+            "url": http_req.get("url", ""),
+            "httpMethod": http_req.get("httpMethod", "POST"),
+            "body": http_req.get("body", ""),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _check_dedup(store, dedup_key: str) -> None:
+    """Raise GCPError(409) if a live dedup entry exists for dedup_key.
+
+    Args:
+        store: The Cloud Tasks NamespacedStore.
+        dedup_key (str): Key to look up in the "dedup" namespace.
+
+    Raises:
+        GCPError: 409 if the dedup window is still active for this key.
+    """
+    entry = store.get("dedup", dedup_key)
+    if entry and entry.get("expiresAt", 0) > time.time():
+        raise GCPError(409, f"Duplicate task rejected (dedup window active): {dedup_key}")
+
+
+def _set_dedup(store, dedup_key: str) -> None:
+    """Record a dedup entry that expires after _DEDUP_WINDOW_S seconds.
+
+    Args:
+        store: The Cloud Tasks NamespacedStore.
+        dedup_key (str): Key to store in the "dedup" namespace.
+    """
+    store.set("dedup", dedup_key, {"expiresAt": time.time() + _DEDUP_WINDOW_S})
 
 
 # ---------------------------------------------------------------------------
@@ -309,11 +361,17 @@ async def create_task(project: str, location: str, queue_id: str, body: CreateTa
         raise GCPError(404, f"Queue {queue_name} not found.")
 
     task_data = body.task
-    task_id = task_data.get("name", "").split("/tasks/")[-1] or uuid.uuid4().hex
+    explicit_name = task_data.get("name", "").split("/tasks/")[-1]
+    is_named = bool(explicit_name)
+    task_id = explicit_name or uuid.uuid4().hex
     task_name = f"{queue_name}/tasks/{task_id}"
 
     if store.exists("tasks", task_name):
         raise GCPError(409, f"Task {task_name} already exists.")
+
+    # Dedup: named tasks use a tombstone key; un-named tasks use a body hash.
+    dedup_key = task_name if is_named else f"body:{_task_body_hash(task_data)}"
+    _check_dedup(store, dedup_key)
 
     http_req = task_data.get("httpRequest")
     task = TaskModel(
@@ -322,6 +380,7 @@ async def create_task(project: str, location: str, queue_id: str, body: CreateTa
         scheduleTime=task_data.get("scheduleTime", _now()),
     )
     store.set("tasks", task_name, task.model_dump())
+    _set_dedup(store, dedup_key)
     return task.model_dump()
 
 
@@ -412,6 +471,8 @@ async def delete_task(project: str, location: str, queue_id: str, task_id: str):
     if not store.exists("tasks", task_name):
         raise GCPError(404, f"Task {task_name} not found.")
     store.delete("tasks", task_name)
+    # Keep a tombstone so the same name cannot be reused within the dedup window.
+    _set_dedup(store, task_name)
     return {}
 
 
