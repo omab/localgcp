@@ -241,6 +241,48 @@ def _apply_query_params(
 _SELECT_KEYWORDS = ("SELECT", "WITH", "VALUES", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")
 
 
+def _split_statements(sql: str) -> list[str]:
+    """Split a SQL string into individual statements on unquoted semicolons.
+
+    Respects single-quote, double-quote, and backtick string delimiters so
+    that semicolons embedded in string literals are not treated as statement
+    separators.
+
+    Args:
+        sql (str): Raw SQL, potentially containing multiple ``; ``-separated
+            statements.
+
+    Returns:
+        list[str]: Non-empty trimmed statement strings.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    in_single = False
+    in_double = False
+    in_backtick = False
+    for ch in sql:
+        if ch == "'" and not in_double and not in_backtick:
+            in_single = not in_single
+            current.append(ch)
+        elif ch == '"' and not in_single and not in_backtick:
+            in_double = not in_double
+            current.append(ch)
+        elif ch == "`" and not in_single and not in_double:
+            in_backtick = not in_backtick
+            current.append(ch)
+        elif ch == ";" and not in_single and not in_double and not in_backtick:
+            stmt = "".join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+        else:
+            current.append(ch)
+    stmt = "".join(current).strip()
+    if stmt:
+        statements.append(stmt)
+    return statements
+
+
 def _is_select(sql: str) -> bool:
     """Return True if the SQL produces a result set.
 
@@ -839,20 +881,27 @@ class BigQueryEngine:
         job_ref = {"projectId": project, "jobId": job_id, "location": "US"}
 
         try:
-            if _is_select(rewritten):
-                columns, rows = self._select(rewritten, duck_params)
-                schema_fields = [
-                    {"name": name, "type": bq_type, "mode": "NULLABLE"} for name, bq_type in columns
-                ]
-                bq_rows = [{"f": [{"v": _serialize_value(v)} for v in row]} for row in rows]
-                num_dml_rows = None
-            else:
-                # DML (INSERT/UPDATE/DELETE) or DDL (CREATE/DROP/ALTER)
-                # DuckDB returns a Count row after DML; capture it.
-                columns, rows = self._select(rewritten, duck_params)
-                num_dml_rows = rows[0][0] if rows and columns and columns[0][0] == "Count" else 0
-                schema_fields = []
-                bq_rows = []
+            stmts = _split_statements(rewritten)
+            schema_fields: list[dict] = []
+            bq_rows: list[dict] = []
+            total_dml_rows = 0
+            has_select = False
+
+            for stmt in stmts:
+                if _is_select(stmt):
+                    has_select = True
+                    columns, rows = self._select(stmt, duck_params)
+                    schema_fields = [
+                        {"name": name, "type": bq_type, "mode": "NULLABLE"}
+                        for name, bq_type in columns
+                    ]
+                    bq_rows = [{"f": [{"v": _serialize_value(v)} for v in row]} for row in rows]
+                else:
+                    columns, rows = self._select(stmt, duck_params)
+                    count = rows[0][0] if rows and columns and columns[0][0] == "Count" else 0
+                    total_dml_rows += count
+
+            num_dml_rows = None if has_select else total_dml_rows
 
             stats: dict = {
                 "creationTime": now,

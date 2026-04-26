@@ -300,11 +300,28 @@ query endpoints. After execution, `numDmlAffectedRows` is reported in the job st
 
 ---
 
+## Multi-statement scripts
+
+Multiple SQL statements separated by `;` are supported. Statements are executed
+sequentially in a single DuckDB connection. The job result contains:
+
+- Rows and schema from the **last SELECT** statement (if any).
+- The **sum of `numDmlAffectedRows`** across all DML statements when no SELECT is present.
+
+```sql
+CREATE TABLE my_dataset.events (id INTEGER, name STRING);
+INSERT INTO my_dataset.events VALUES (1, 'click'), (2, 'view');
+SELECT id, name FROM my_dataset.events ORDER BY id
+```
+
+Limitations: `DECLARE`/`SET` variable statements and `BEGIN…END` blocks are not supported.
+
+---
+
 ## Known limitations
 
 | Feature | Notes |
 |---|---|
-| Multi-statement scripts | `CREATE TEMP TABLE ...` and `;`-separated scripts are not split and executed sequentially |
 | Partitioned tables | Partition metadata accepted but query pruning not implemented |
 | Clustered tables | Clustering config accepted but not enforced |
 | External tables | Not supported |

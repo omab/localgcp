@@ -1273,3 +1273,135 @@ def test_merge_reports_dml_affected_rows(bq_client):
     job = _run_merge(bq_client, sql)
     stats = job["statistics"].get("query", {})
     assert int(stats.get("numDmlAffectedRows", 0)) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Multi-statement scripts
+# ---------------------------------------------------------------------------
+
+
+def _run_script(bq_client, sql):
+    """Execute a multi-statement script and return the job dict."""
+    r = bq_client.post(
+        f"{BASE}/jobs",
+        json={"configuration": {"query": {"query": sql, "useLegacySql": False}}},
+    )
+    assert r.status_code == 200
+    return r.json()
+
+
+def _query_rows(bq_client, sql):
+    """Execute a SELECT and return rows via GET /queries."""
+    r = bq_client.post(
+        f"{BASE}/jobs",
+        json={"configuration": {"query": {"query": sql, "useLegacySql": False}}},
+    )
+    job_id = r.json()["jobReference"]["jobId"]
+    result = bq_client.get(f"{BASE}/queries/{job_id}")
+    return result.json().get("rows", [])
+
+
+def test_multi_statement_create_insert_select(bq_client):
+    sql = """
+    CREATE TABLE ms_ds1.events (id INTEGER, name STRING);
+    INSERT INTO ms_ds1.events VALUES (1, 'a');
+    INSERT INTO ms_ds1.events VALUES (2, 'b');
+    SELECT id, name FROM ms_ds1.events ORDER BY id
+    """
+    bq_client.post(
+        f"{BASE}/datasets",
+        json={"datasetReference": {"projectId": PROJECT, "datasetId": "ms_ds1"}},
+    )
+    job = _run_script(bq_client, sql)
+    assert job["status"]["state"] == "DONE"
+    assert job["status"]["errorResult"] is None
+
+    job_id = job["jobReference"]["jobId"]
+    result = bq_client.get(f"{BASE}/queries/{job_id}")
+    rows = result.json()["rows"]
+    assert len(rows) == 2
+    assert rows[0]["f"][0]["v"] == "1"
+    assert rows[1]["f"][1]["v"] == "b"
+
+
+def test_multi_statement_dml_accumulates_counts(bq_client):
+    bq_client.post(
+        f"{BASE}/datasets",
+        json={"datasetReference": {"projectId": PROJECT, "datasetId": "ms_dml_ds"}},
+    )
+    setup_sql = "CREATE TABLE ms_dml_ds.t (id INTEGER, v STRING)"
+    _run_script(bq_client, setup_sql)
+
+    sql = """
+    INSERT INTO ms_dml_ds.t VALUES (1, 'x');
+    INSERT INTO ms_dml_ds.t VALUES (2, 'y'), (3, 'z')
+    """
+    job = _run_script(bq_client, sql)
+    stats = job["statistics"].get("query", {})
+    assert int(stats.get("numDmlAffectedRows", 0)) == 3
+
+
+def test_multi_statement_last_select_wins(bq_client):
+    bq_client.post(
+        f"{BASE}/datasets",
+        json={"datasetReference": {"projectId": PROJECT, "datasetId": "ms_sel_ds"}},
+    )
+    setup = "CREATE TABLE ms_sel_ds.t (id INTEGER)"
+    _run_script(bq_client, setup)
+
+    sql = """
+    INSERT INTO ms_sel_ds.t VALUES (10);
+    INSERT INTO ms_sel_ds.t VALUES (20);
+    SELECT id FROM ms_sel_ds.t ORDER BY id
+    """
+    job = _run_script(bq_client, sql)
+    assert job["status"]["errorResult"] is None
+
+    job_id = job["jobReference"]["jobId"]
+    result = bq_client.get(f"{BASE}/queries/{job_id}")
+    rows = result.json()["rows"]
+    assert [r["f"][0]["v"] for r in rows] == ["10", "20"]
+
+
+def test_multi_statement_error_propagates(bq_client):
+    bq_client.post(
+        f"{BASE}/datasets",
+        json={"datasetReference": {"projectId": PROJECT, "datasetId": "ms_err_ds"}},
+    )
+    sql = """
+    CREATE TABLE ms_err_ds.ok (id INTEGER);
+    SELECT * FROM nonexistent_table_xyz
+    """
+    job = _run_script(bq_client, sql)
+    assert job["status"]["errorResult"] is not None
+
+
+def test_single_statement_without_semicolon_unchanged(bq_client):
+    bq_client.post(
+        f"{BASE}/datasets",
+        json={"datasetReference": {"projectId": PROJECT, "datasetId": "ms_single_ds"}},
+    )
+    bq_client.post(
+        f"{BASE}/datasets/ms_single_ds/tables",
+        json={
+            "tableReference": {
+                "projectId": PROJECT,
+                "datasetId": "ms_single_ds",
+                "tableId": "t",
+            },
+            "schema": {"fields": [{"name": "id", "type": "INTEGER", "mode": "REQUIRED"}]},
+        },
+    )
+    bq_client.post(
+        f"{BASE}/jobs",
+        json={
+            "configuration": {
+                "query": {
+                    "query": "INSERT INTO ms_single_ds.t VALUES (99)",
+                    "useLegacySql": False,
+                }
+            }
+        },
+    )
+    rows = _query_rows(bq_client, "SELECT id FROM ms_single_ds.t")
+    assert rows[0]["f"][0]["v"] == "99"
