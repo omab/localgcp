@@ -154,7 +154,8 @@ async def _tick(client: httpx.AsyncClient) -> None:
                 continue
 
             http_req = task.get("httpRequest")
-            if not http_req:
+            pubsub_target = task.get("pubsubTarget")
+            if not http_req and not pubsub_target:
                 store.delete("tasks", task_key)
                 continue
 
@@ -169,13 +170,15 @@ async def _tick(client: httpx.AsyncClient) -> None:
 
         # Dispatch concurrently, bounded by maxConcurrentDispatches
         sem = _get_semaphore(queue_name, max_concurrent)
-        await asyncio.gather(
-            *(
-                _dispatch_with_sem(client, store, task_key, task, http_req, sem)
-                for task_key, task in ready
-                for http_req in [task["httpRequest"]]
-            )
-        )
+        coros = []
+        for task_key, task in ready:
+            if task.get("httpRequest"):
+                coros.append(
+                    _dispatch_with_sem(client, store, task_key, task, task["httpRequest"], sem)
+                )
+            elif task.get("pubsubTarget"):
+                coros.append(_dispatch_pubsub(store, task_key, task, task["pubsubTarget"]))
+        await asyncio.gather(*coros)
 
 
 async def _dispatch_with_sem(
@@ -257,3 +260,55 @@ async def _dispatch(client, store, task_key: str, task: dict, http_req: dict) ->
     task["scheduleTime"] = next_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     logger.debug("Task %s retry %d in %.2fs", task_key, task["dispatchCount"], delay)
     store.set("tasks", task_key, task)
+
+
+async def _dispatch_pubsub(store, task_key: str, task: dict, pubsub_target: dict) -> None:
+    """Publish a task's Pub/Sub target message to the configured topic.
+
+    Directly enqueues a message into the in-process Pub/Sub store rather than
+    making an HTTP call. On success the task is deleted. If the topic does not
+    exist, the task is also deleted (unroutable).
+
+    Args:
+        store: The Cloud Tasks store instance.
+        task_key (str): Store key for the task.
+        task (dict): Task data dict.
+        pubsub_target (dict): Pub/Sub target config with ``topicName``, ``data``,
+            and ``attributes``.
+    """
+    import uuid
+
+    from cloudbox.services.pubsub.store import enqueue, ensure_queue
+    from cloudbox.services.pubsub.store import get_store as pubsub_store
+
+    topic_name = pubsub_target.get("topicName", "")
+    data = pubsub_target.get("data", "")
+    attributes = pubsub_target.get("attributes", {})
+
+    now = _now()
+    task["dispatchCount"] = task.get("dispatchCount", 0) + 1
+    attempt = {"scheduleTime": task["scheduleTime"], "dispatchTime": now}
+    if not task.get("firstAttempt"):
+        task["firstAttempt"] = attempt
+    task["lastAttempt"] = attempt
+
+    ps_store = pubsub_store()
+    if not ps_store.exists("topics", topic_name):
+        logger.warning("Task %s pubsubTarget topic %s not found, dropping", task_key, topic_name)
+        store.delete("tasks", task_key)
+        return
+
+    message = {
+        "data": data,
+        "attributes": attributes,
+        "messageId": uuid.uuid4().hex,
+        "publishTime": now,
+        "orderingKey": "",
+    }
+    for sub in ps_store.list("subscriptions"):
+        if sub["topic"] == topic_name:
+            ensure_queue(sub["name"])
+            enqueue(sub["name"], message)
+
+    logger.info("Task %s published to Pub/Sub topic %s", task_key, topic_name)
+    store.delete("tasks", task_key)

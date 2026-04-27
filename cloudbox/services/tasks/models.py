@@ -61,6 +61,14 @@ class HttpRequest(BaseModel):
     body: str = ""  # base64-encoded
 
 
+class PubsubTarget(BaseModel):
+    """Pub/Sub target configuration for a Cloud Tasks task."""
+
+    topicName: str
+    data: str = ""  # base64-encoded message payload
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
 class TaskAttempt(BaseModel):
     """Details of a single task dispatch attempt."""
 
@@ -75,6 +83,7 @@ class TaskModel(BaseModel):
 
     name: str
     httpRequest: HttpRequest | None = None
+    pubsubTarget: PubsubTarget | None = None
     scheduleTime: str = Field(default_factory=_now)
     createTime: str = Field(default_factory=_now)
     dispatchDeadline: str = "1800s"

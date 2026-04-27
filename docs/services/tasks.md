@@ -190,6 +190,7 @@ Returns the updated task resource.
 |---|---|---|
 | `name` | string | Full resource name |
 | `httpRequest` | object | HTTP target configuration |
+| `pubsubTarget` | object | Pub/Sub target configuration (publish instead of HTTP call) |
 | `scheduleTime` | string | RFC 3339 time at which the task should be dispatched |
 | `createTime` | string | RFC 3339 creation timestamp |
 | `dispatchCount` | int | Number of dispatch attempts |
@@ -207,6 +208,17 @@ Returns the updated task resource.
 | `body` | string | Base64-encoded request body |
 | `oidcToken` | object | OIDC token configuration (stored, not enforced) |
 | `oauthToken` | object | OAuth token configuration (stored, not enforced) |
+
+### Pub/Sub target fields
+
+| Field | Type | Description |
+|---|---|---|
+| `topicName` | string | Full topic resource name (`projects/{project}/topics/{topic}`) |
+| `data` | string | Base64-encoded message payload |
+| `attributes` | object | String key/value message attributes |
+
+When dispatched, the worker publishes the message directly to the in-process Pub/Sub store.
+If the topic does not exist the task is silently dropped.
 
 ---
 
@@ -227,7 +239,7 @@ Returns the updated task resource.
 |---|---|
 | Automatic task dispatch | Tasks are not dispatched automatically; use `:run` or pull manually |
 | OIDC / OAuth token injection | Auth tokens accepted and stored but not attached to dispatch requests |
-| App Engine HTTP tasks | `appEngineHttpRequest` accepted but not dispatched |
+| App Engine HTTP tasks | `appEngineHttpRequest` not implemented |
 | Content-based deduplication | Only exact name collisions are rejected — body-hash deduplication is not implemented |
 | Rate limiting | `rateLimits` stored and returned but not enforced |
 

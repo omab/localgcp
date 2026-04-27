@@ -21,6 +21,7 @@ from cloudbox.services.tasks.models import (
     HttpRequest,
     ListQueuesResponse,
     ListTasksResponse,
+    PubsubTarget,
     QueueModel,
     QueueState,
     TaskModel,
@@ -374,9 +375,11 @@ async def create_task(project: str, location: str, queue_id: str, body: CreateTa
     _check_dedup(store, dedup_key)
 
     http_req = task_data.get("httpRequest")
+    pubsub_target = task_data.get("pubsubTarget")
     task = TaskModel(
         name=task_name,
         httpRequest=HttpRequest(**http_req) if http_req else None,
+        pubsubTarget=PubsubTarget(**pubsub_target) if pubsub_target else None,
         scheduleTime=task_data.get("scheduleTime", _now()),
     )
     store.set("tasks", task_name, task.model_dump())

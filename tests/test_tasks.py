@@ -559,3 +559,109 @@ def test_content_dedup_allows_different_bodies(tasks_client):
         json={"task": {"httpRequest": {"url": "http://localhost/b", "httpMethod": "POST"}}},
     )
     assert r2.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Pub/Sub target
+# ---------------------------------------------------------------------------
+
+
+def test_create_task_with_pubsub_target(tasks_client):
+    """Tasks with pubsubTarget are accepted and stored."""
+    tasks_client.post(
+        f"{BASE}/queues",
+        json={"name": f"projects/{PROJECT}/locations/{LOCATION}/queues/ps-q"},
+    )
+    r = tasks_client.post(
+        f"{BASE}/queues/ps-q/tasks",
+        json={
+            "task": {
+                "pubsubTarget": {
+                    "topicName": "projects/local-project/topics/my-topic",
+                    "data": "aGVsbG8=",
+                    "attributes": {"key": "val"},
+                }
+            }
+        },
+    )
+    assert r.status_code == 200
+    task = r.json()
+    assert task["pubsubTarget"]["topicName"] == "projects/local-project/topics/my-topic"
+
+
+def test_dispatch_pubsub_target_enqueues_message():
+    """_dispatch_pubsub publishes the message to the Pub/Sub store and deletes the task."""
+    import asyncio
+
+    from cloudbox.services.pubsub.store import _queues, ensure_queue
+    from cloudbox.services.pubsub.store import get_store as pubsub_store
+    from cloudbox.services.tasks.store import get_store as tasks_store
+    from cloudbox.services.tasks.worker import _dispatch_pubsub
+
+    t_store = tasks_store()
+    t_store.reset()
+    ps_store = pubsub_store()
+    ps_store.reset()
+    _queues.clear()
+
+    topic = f"projects/{PROJECT}/topics/dispatch-topic"
+    sub_name = f"projects/{PROJECT}/subscriptions/dispatch-sub"
+    ps_store.set("topics", topic, {"name": topic})
+    ps_store.set("subscriptions", sub_name, {"name": sub_name, "topic": topic})
+    ensure_queue(sub_name)
+
+    queue_name = f"projects/{PROJECT}/locations/us-central1/queues/ps-dispatch-q"
+    task_key = f"{queue_name}/tasks/t1"
+    task = {
+        "name": task_key,
+        "scheduleTime": "2020-01-01T00:00:00.000Z",
+        "pubsubTarget": {
+            "topicName": topic,
+            "data": "dGVzdA==",
+            "attributes": {"env": "test"},
+        },
+    }
+    t_store.set("tasks", task_key, task)
+
+    asyncio.run(_dispatch_pubsub(t_store, task_key, task, task["pubsubTarget"]))
+
+    # Task should be deleted after dispatch
+    assert t_store.get("tasks", task_key) is None
+
+    # Message should be in the subscription queue
+    from cloudbox.services.pubsub.store import _queues as queues_after
+
+    envelopes = list(queues_after.get(sub_name, []))
+    assert len(envelopes) == 1
+    assert envelopes[0].message["data"] == "dGVzdA=="
+    assert envelopes[0].message["attributes"]["env"] == "test"
+
+
+def test_dispatch_pubsub_target_drops_task_when_topic_missing():
+    """_dispatch_pubsub silently drops the task if the topic does not exist."""
+    import asyncio
+
+    from cloudbox.services.pubsub.store import _queues
+    from cloudbox.services.pubsub.store import get_store as pubsub_store
+    from cloudbox.services.tasks.store import get_store as tasks_store
+    from cloudbox.services.tasks.worker import _dispatch_pubsub
+
+    t_store = tasks_store()
+    t_store.reset()
+    pubsub_store().reset()
+    _queues.clear()
+
+    queue_name = f"projects/{PROJECT}/locations/us-central1/queues/ps-miss-q"
+    task_key = f"{queue_name}/tasks/t1"
+    task = {
+        "name": task_key,
+        "scheduleTime": "2020-01-01T00:00:00.000Z",
+        "pubsubTarget": {
+            "topicName": "projects/x/topics/ghost",
+            "data": "",
+            "attributes": {},
+        },
+    }
+    t_store.set("tasks", task_key, task)
+    asyncio.run(_dispatch_pubsub(t_store, task_key, task, task["pubsubTarget"]))
+    assert t_store.get("tasks", task_key) is None
