@@ -344,11 +344,50 @@ Response:
 
 ---
 
+## MAC keys (HMAC-SHA256)
+
+Create a MAC key with `purpose: "MAC"` and `versionTemplate.algorithm: "HMAC_SHA256"`.
+
+### macSign
+
+```
+POST /v1/.../cryptoKeyVersions/{version_id}:macSign
+```
+
+```json
+{ "data": "<base64-encoded data>" }
+```
+
+Response:
+
+```json
+{ "name": "...", "mac": "<base64-encoded HMAC-SHA256 tag>", "protectionLevel": "SOFTWARE" }
+```
+
+### macVerify
+
+```
+POST /v1/.../cryptoKeyVersions/{version_id}:macVerify
+```
+
+```json
+{ "data": "<base64-encoded data>", "mac": "<base64-encoded tag>" }
+```
+
+Response:
+
+```json
+{ "name": "...", "success": true, "protectionLevel": "SOFTWARE" }
+```
+
+`success` is `true` when the HMAC tag is valid; `false` otherwise (always HTTP 200).
+
+---
+
 ## Known limitations
 
 | Feature | Notes |
 |---|---|
-| MAC keys (HMAC) | Not implemented |
 | Key import | `ImportJob` endpoints not implemented |
 | Key deletion | GCP does not allow key ring or key deletion; `DELETE` is not implemented |
 | IAM | Not enforced |

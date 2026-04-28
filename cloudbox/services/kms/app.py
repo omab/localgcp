@@ -4,17 +4,20 @@ Implements the Cloud KMS REST API v1 used by google-cloud-kms.
 
 Supports:
   - KeyRing CRUD
-  - CryptoKey CRUD (ENCRYPT_DECRYPT, ASYMMETRIC_SIGN, ASYMMETRIC_DECRYPT purposes)
+  - CryptoKey CRUD (ENCRYPT_DECRYPT, ASYMMETRIC_SIGN, ASYMMETRIC_DECRYPT, MAC purposes)
   - CryptoKeyVersion lifecycle (create, enable, disable, destroy, restore)
   - Symmetric encrypt/decrypt (AES-256-GCM)
   - Asymmetric sign/verify (EC P-256/P-384, RSA-PSS 2048/3072/4096)
   - Asymmetric decrypt (RSA-OAEP)
   - getPublicKey for asymmetric key versions
+  - MAC sign/verify (HMAC-SHA256)
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac as _hmac
 import os
 import struct
 
@@ -42,6 +45,10 @@ from cloudbox.services.kms.models import (
     ListCryptoKeysResponse,
     ListCryptoKeyVersionsResponse,
     ListKeyRingsResponse,
+    MacSignRequest,
+    MacSignResponse,
+    MacVerifyRequest,
+    MacVerifyResponse,
     PublicKeyResponse,
     _now,
 )
@@ -198,6 +205,20 @@ def _load_private_key(version_name: str):
     return serialization.load_pem_private_key(pem, password=None)
 
 
+def _compute_hmac(key_b64: str, data: bytes) -> bytes:
+    """Compute HMAC-SHA256 over data using a base64-encoded key.
+
+    Args:
+        key_b64: Base64-encoded raw HMAC key bytes.
+        data: Raw bytes to authenticate.
+
+    Returns:
+        Raw 32-byte HMAC-SHA256 digest.
+    """
+    key = base64.b64decode(key_b64)
+    return _hmac.new(key, data, hashlib.sha256).digest()
+
+
 def _provision_version(version_name: str, purpose: str) -> None:
     """Generate and store key material for a new CryptoKeyVersion.
 
@@ -214,6 +235,10 @@ def _provision_version(version_name: str, purpose: str) -> None:
         algorithm = version_data.get("algorithm", "")
         pem = _generate_asymmetric_key(algorithm)
         _store().set("keys", version_name, base64.b64encode(pem).decode())
+    elif purpose == CryptoKeyPurpose.MAC:
+        # 32-byte random key for HMAC-SHA256
+        key = os.urandom(32)
+        _store().set("keys", version_name, base64.b64encode(key).decode())
 
 
 def _next_version_number(key_name: str) -> int:
@@ -1041,6 +1066,120 @@ async def asymmetric_decrypt(
 
     return AsymmetricDecryptResponse(
         plaintext=base64.b64encode(plaintext).decode(),
+    ).model_dump(exclude_none=True)
+
+
+@app.post(
+    "/v1/projects/{project}/locations/{location}/keyRings/{key_ring_id}/cryptoKeys/{crypto_key_id}/cryptoKeyVersions/{version_id}:macSign"
+)
+async def mac_sign(
+    project: str,
+    location: str,
+    key_ring_id: str,
+    crypto_key_id: str,
+    version_id: str,
+    body: MacSignRequest,
+) -> dict:
+    """Compute an HMAC-SHA256 tag over the supplied data.
+
+    Args:
+        project: GCP project ID.
+        location: GCP region.
+        key_ring_id: Key ring identifier.
+        crypto_key_id: CryptoKey identifier.
+        version_id: CryptoKeyVersion identifier.
+        body: MacSignRequest with base64-encoded ``data``.
+
+    Returns:
+        MacSignResponse with base64-encoded ``mac`` tag.
+
+    Raises:
+        GCPError: 404 if version not found; 400 if not a MAC key or not ENABLED.
+    """
+    version_name = (
+        f"projects/{project}/locations/{location}/keyRings/{key_ring_id}"
+        f"/cryptoKeys/{crypto_key_id}/cryptoKeyVersions/{version_id}"
+    )
+    version_data = _store().get("versions", version_name)
+    if version_data is None:
+        raise GCPError(404, f"CryptoKeyVersion {version_name} not found")
+    if version_data.get("state") != CryptoKeyVersionState.ENABLED:
+        raise GCPError(400, f"CryptoKeyVersion {version_name} is not ENABLED")
+
+    key_name = (
+        f"projects/{project}/locations/{location}/keyRings/{key_ring_id}/cryptoKeys/{crypto_key_id}"
+    )
+    ck_data = _store().get("cryptokeys", key_name)
+    if not ck_data or ck_data.get("purpose") != CryptoKeyPurpose.MAC:
+        raise GCPError(400, "macSign requires a MAC key")
+
+    key_b64 = _store().get("keys", version_name)
+    if not key_b64:
+        raise GCPError(404, f"Key material for {version_name} not found")
+
+    data = base64.b64decode(body.data) if body.data else b""
+    mac = _compute_hmac(key_b64, data)
+    return MacSignResponse(
+        name=version_name,
+        mac=base64.b64encode(mac).decode(),
+    ).model_dump(exclude_none=True)
+
+
+@app.post(
+    "/v1/projects/{project}/locations/{location}/keyRings/{key_ring_id}/cryptoKeys/{crypto_key_id}/cryptoKeyVersions/{version_id}:macVerify"
+)
+async def mac_verify(
+    project: str,
+    location: str,
+    key_ring_id: str,
+    crypto_key_id: str,
+    version_id: str,
+    body: MacVerifyRequest,
+) -> dict:
+    """Verify an HMAC-SHA256 tag against the supplied data.
+
+    Args:
+        project: GCP project ID.
+        location: GCP region.
+        key_ring_id: Key ring identifier.
+        crypto_key_id: CryptoKey identifier.
+        version_id: CryptoKeyVersion identifier.
+        body: MacVerifyRequest with base64-encoded ``data`` and ``mac``.
+
+    Returns:
+        MacVerifyResponse with ``success=True`` if the tag is valid.
+
+    Raises:
+        GCPError: 404 if version not found; 400 if not a MAC key or not ENABLED.
+    """
+    version_name = (
+        f"projects/{project}/locations/{location}/keyRings/{key_ring_id}"
+        f"/cryptoKeys/{crypto_key_id}/cryptoKeyVersions/{version_id}"
+    )
+    version_data = _store().get("versions", version_name)
+    if version_data is None:
+        raise GCPError(404, f"CryptoKeyVersion {version_name} not found")
+    if version_data.get("state") != CryptoKeyVersionState.ENABLED:
+        raise GCPError(400, f"CryptoKeyVersion {version_name} is not ENABLED")
+
+    key_name = (
+        f"projects/{project}/locations/{location}/keyRings/{key_ring_id}/cryptoKeys/{crypto_key_id}"
+    )
+    ck_data = _store().get("cryptokeys", key_name)
+    if not ck_data or ck_data.get("purpose") != CryptoKeyPurpose.MAC:
+        raise GCPError(400, "macVerify requires a MAC key")
+
+    key_b64 = _store().get("keys", version_name)
+    if not key_b64:
+        raise GCPError(404, f"Key material for {version_name} not found")
+
+    data = base64.b64decode(body.data) if body.data else b""
+    expected = _compute_hmac(key_b64, data)
+    provided = base64.b64decode(body.mac)
+    success = _hmac.compare_digest(expected, provided)
+    return MacVerifyResponse(
+        name=version_name,
+        success=success,
     ).model_dump(exclude_none=True)
 
 

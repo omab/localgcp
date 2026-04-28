@@ -177,3 +177,39 @@ class AsymmetricDecryptResponse(BaseModel):
     plaintextCrc32c: str | None = None
     verifiedCiphertextCrc32c: bool = False
     protectionLevel: str = "SOFTWARE"
+
+
+class MacSignRequest(BaseModel):
+    """Request body for macSign."""
+
+    data: str  # base64-encoded plaintext to authenticate
+    dataCrc32c: str | None = None
+
+
+class MacSignResponse(BaseModel):
+    """Response body for macSign."""
+
+    name: str = ""
+    mac: str = ""  # base64-encoded HMAC-SHA256 tag
+    macCrc32c: str | None = None
+    verifiedDataCrc32c: bool = False
+    protectionLevel: str = "SOFTWARE"
+
+
+class MacVerifyRequest(BaseModel):
+    """Request body for macVerify."""
+
+    data: str  # base64-encoded plaintext
+    mac: str  # base64-encoded HMAC-SHA256 tag to verify
+    dataCrc32c: str | None = None
+    macCrc32c: str | None = None
+
+
+class MacVerifyResponse(BaseModel):
+    """Response body for macVerify."""
+
+    name: str = ""
+    success: bool = False
+    verifiedDataCrc32c: bool = False
+    verifiedMacCrc32c: bool = False
+    protectionLevel: str = "SOFTWARE"

@@ -606,3 +606,84 @@ def test_asymmetric_sign_rsa_pss(kms_client):
     )
     assert r.status_code == 200
     assert len(base64.b64decode(r.json()["signature"])) > 0
+
+
+# ---------------------------------------------------------------------------
+# MAC keys (HMAC-SHA256)
+# ---------------------------------------------------------------------------
+
+
+def _mac_key(kms_client, ring="mac-ring", key="mac-key"):
+    kms_client.post(f"{BASE}/keyRings", params={"keyRingId": ring}, json={})
+    kms_client.post(
+        f"{BASE}/keyRings/{ring}/cryptoKeys",
+        params={"cryptoKeyId": key},
+        json={
+            "purpose": "MAC",
+            "versionTemplate": {"algorithm": "HMAC_SHA256"},
+        },
+    )
+    return f"{BASE}/keyRings/{ring}/cryptoKeys/{key}/cryptoKeyVersions/1"
+
+
+def test_mac_sign_basic(kms_client):
+    version_path = _mac_key(kms_client)
+    r = kms_client.post(
+        f"{version_path}:macSign",
+        json={"data": base64.b64encode(b"hello mac").decode()},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "mac" in body
+    tag = base64.b64decode(body["mac"])
+    assert len(tag) == 32  # HMAC-SHA256 produces 32 bytes
+
+
+def test_mac_sign_verify_roundtrip(kms_client):
+    version_path = _mac_key(kms_client, ring="mac-rv-ring", key="mac-rv-key")
+    data_b64 = base64.b64encode(b"verify me").decode()
+
+    sign_r = kms_client.post(f"{version_path}:macSign", json={"data": data_b64})
+    assert sign_r.status_code == 200
+    mac_b64 = sign_r.json()["mac"]
+
+    verify_r = kms_client.post(
+        f"{version_path}:macVerify",
+        json={"data": data_b64, "mac": mac_b64},
+    )
+    assert verify_r.status_code == 200
+    assert verify_r.json()["success"] is True
+
+
+def test_mac_verify_wrong_mac_returns_false(kms_client):
+    version_path = _mac_key(kms_client, ring="mac-bad-ring", key="mac-bad-key")
+    data_b64 = base64.b64encode(b"some data").decode()
+    bad_mac = base64.b64encode(b"\x00" * 32).decode()
+
+    r = kms_client.post(
+        f"{version_path}:macVerify",
+        json={"data": data_b64, "mac": bad_mac},
+    )
+    assert r.status_code == 200
+    assert r.json()["success"] is False
+
+
+def test_mac_sign_wrong_key_type_returns_400(kms_client):
+    kms_client.post(f"{BASE}/keyRings", params={"keyRingId": "enc-ring-mac"}, json={})
+    kms_client.post(
+        f"{BASE}/keyRings/enc-ring-mac/cryptoKeys",
+        params={"cryptoKeyId": "enc-key"},
+        json={"purpose": "ENCRYPT_DECRYPT"},
+    )
+    r = kms_client.post(
+        f"{BASE}/keyRings/enc-ring-mac/cryptoKeys/enc-key/cryptoKeyVersions/1:macSign",
+        json={"data": base64.b64encode(b"data").decode()},
+    )
+    assert r.status_code == 400
+
+
+def test_mac_key_purpose_stored(kms_client):
+    _mac_key(kms_client, ring="mac-purpose-ring", key="mac-purpose-key")
+    r = kms_client.get(f"{BASE}/keyRings/mac-purpose-ring/cryptoKeys/mac-purpose-key")
+    assert r.status_code == 200
+    assert r.json()["purpose"] == "MAC"

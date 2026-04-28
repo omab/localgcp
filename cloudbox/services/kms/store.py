@@ -14,4 +14,5 @@ _store = NamespacedStore("kms", settings.data_dir)
 
 
 def get_store() -> NamespacedStore:
+    """Return the shared KMS NamespacedStore instance."""
     return _store
